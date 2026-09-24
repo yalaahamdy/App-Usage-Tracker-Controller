@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">مراقب الاستخدام</string>
+    <string name="accessibility_service_description">تُستخدم هذه الخدمة لاكتشاف تشغيل التطبيقات المقيدة فورياً وتطبيق حدود الاستخدام وجداول الأوقات دون تأخير وبأعلى كفاءة في استهلاك البطارية.</string>
+</resources>

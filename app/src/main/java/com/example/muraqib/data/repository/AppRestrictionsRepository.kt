@@ -1,0 +1,430 @@
+package com.example.muraqib.data.repository
+
+import android.content.Context
+import android.content.SharedPreferences
+import com.example.muraqib.data.model.AppRestriction
+import com.example.muraqib.data.model.BlockReason
+import com.example.muraqib.data.model.LimitPeriod
+import com.example.muraqib.data.model.RestrictionEvaluation
+import com.example.muraqib.data.model.TimeWindow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import java.util.Calendar
+import java.util.Locale
+
+/**
+ * مستودع إدارة وتخزين وتقييم قيود استخدام التطبيقات
+ */
+class AppRestrictionsRepository(context: Context) {
+
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private val _restrictionsFlow = MutableStateFlow<List<AppRestriction>>(emptyList())
+    val restrictionsFlow: StateFlow<List<AppRestriction>> = _restrictionsFlow.asStateFlow()
+
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == KEY_RESTRICTIONS_JSON) {
+            loadRestrictions()
+        }
+    }
+
+    companion object {
+        private const val PREFS_NAME = "muraqib_restrictions_prefs"
+        private const val KEY_RESTRICTIONS_JSON = "restrictions_json"
+        private const val PREFIX_BYPASS_UNTIL = "bypass_until_"
+        private const val PREFIX_BYPASS_DURATION = "bypass_duration_"
+
+        @Volatile
+        private var instance: AppRestrictionsRepository? = null
+
+        fun getInstance(context: Context): AppRestrictionsRepository {
+            return instance ?: synchronized(this) {
+                instance ?: AppRestrictionsRepository(context.applicationContext).also { instance = it }
+            }
+        }
+
+        /**
+         * تنسيق مدة التخطي باللغة العربية بدقة (من 1 دقيقة إلى 5 ساعات)
+         */
+        fun formatBypassDuration(minutes: Int): String {
+            if (minutes <= 0) return "أقل من دقيقة"
+            val hours = minutes / 60
+            val mins = minutes % 60
+            val hoursStr = when (hours) {
+                0 -> null
+                1 -> "ساعة واحدة"
+                2 -> "ساعتان"
+                in 3..10 -> "$hours ساعات"
+                else -> "$hours ساعة"
+            }
+            val minsStr = when (mins) {
+                0 -> null
+                1 -> "دقيقة واحدة"
+                2 -> "دقيقتان"
+                in 3..10 -> "$mins دقائق"
+                else -> "$mins دقيقة"
+            }
+            return when {
+                hoursStr != null && minsStr != null -> "$hoursStr و $minsStr"
+                hoursStr != null -> hoursStr
+                minsStr != null -> minsStr
+                else -> "$minutes دقيقة"
+            }
+        }
+    }
+
+    init {
+        loadRestrictions()
+        prefs.registerOnSharedPreferenceChangeListener(prefListener)
+    }
+
+    @Synchronized
+    fun loadRestrictions() {
+        val jsonString = prefs.getString(KEY_RESTRICTIONS_JSON, null) ?: "[]"
+        try {
+            val jsonArray = JSONArray(jsonString)
+            val list = mutableListOf<AppRestriction>()
+            for (i in 0 until jsonArray.length()) {
+                jsonArray.optJSONObject(i)?.let {
+                    list.add(AppRestriction.fromJsonObject(it))
+                }
+            }
+            _restrictionsFlow.value = list
+        } catch (e: Exception) {
+            _restrictionsFlow.value = emptyList()
+        }
+    }
+
+    private fun persistRestrictions(list: List<AppRestriction>) {
+        val jsonArray = JSONArray()
+        list.forEach { jsonArray.put(it.toJsonObject()) }
+        prefs.edit().putString(KEY_RESTRICTIONS_JSON, jsonArray.toString()).apply()
+        _restrictionsFlow.value = list
+    }
+
+    fun getAllRestrictions(): List<AppRestriction> {
+        loadRestrictions()
+        return _restrictionsFlow.value
+    }
+
+    fun getRestrictionForPackage(packageName: String): AppRestriction? {
+        loadRestrictions()
+        return _restrictionsFlow.value.find { it.isEnabled && it.appliesTo(packageName) }
+            ?: _restrictionsFlow.value.find { it.appliesTo(packageName) }
+    }
+
+    fun saveRestriction(restriction: AppRestriction) {
+        val currentList = _restrictionsFlow.value.toMutableList()
+        val index = currentList.indexOfFirst { it.id == restriction.id }
+        if (index >= 0) {
+            currentList[index] = restriction
+        } else {
+            currentList.add(restriction)
+        }
+        persistRestrictions(currentList)
+    }
+
+    fun deleteRestriction(id: String) {
+        val currentList = _restrictionsFlow.value.filter { it.id != id }
+        persistRestrictions(currentList)
+    }
+
+    fun toggleRestriction(id: String, isEnabled: Boolean) {
+        val currentList = _restrictionsFlow.value.map {
+            if (it.id == id) it.copy(isEnabled = isEnabled) else it
+        }
+        persistRestrictions(currentList)
+    }
+
+    /**
+     * تفعيل تخطي الحظر المؤقت لتطبيق معين لعدد محدد من الدقائق لمرة واحدة
+     */
+    fun setTemporaryBypass(packageName: String, durationMinutes: Int) {
+        if (durationMinutes <= 0) return
+        val expiry = System.currentTimeMillis() + (durationMinutes * 60_000L)
+        prefs.edit()
+            .putLong("$PREFIX_BYPASS_UNTIL$packageName", expiry)
+            .putInt("$PREFIX_BYPASS_DURATION$packageName", durationMinutes)
+            .apply()
+        loadRestrictions()
+    }
+
+    /**
+     * استرجاع الثواني المتبقية للتخطي المؤقت للتطبيق
+     */
+    fun getTemporaryBypassRemainingSeconds(packageName: String): Long {
+        val expiry = prefs.getLong("$PREFIX_BYPASS_UNTIL$packageName", 0L)
+        val diff = expiry - System.currentTimeMillis()
+        return if (diff > 0) (diff / 1000L) + 1 else 0L
+    }
+
+    /**
+     * التحقق مما إذا كان هناك تخطٍ مؤقت نشط للتطبيق حاليًا
+     */
+    fun isPackageBypassed(packageName: String): Boolean {
+        val remaining = getTemporaryBypassRemainingSeconds(packageName)
+        if (remaining <= 0L) {
+            if (prefs.contains("$PREFIX_BYPASS_UNTIL$packageName")) {
+                prefs.edit()
+                    .remove("$PREFIX_BYPASS_UNTIL$packageName")
+                    .remove("$PREFIX_BYPASS_DURATION$packageName")
+                    .apply()
+            }
+            return false
+        }
+        return true
+    }
+
+    /**
+     * إلغاء التخطي المؤقت فورًا
+     */
+    fun clearTemporaryBypass(packageName: String) {
+        prefs.edit()
+            .remove("$PREFIX_BYPASS_UNTIL$packageName")
+            .remove("$PREFIX_BYPASS_DURATION$packageName")
+            .apply()
+        loadRestrictions()
+    }
+
+    /**
+     * تقييم قيد تطبيق معين في اللحظة الحالية والتحقق مما إذا كان محظورًا وسبب الحظر
+     */
+    fun evaluateRestriction(
+        restriction: AppRestriction?,
+        consumedMinutes: Int,
+        calendar: Calendar = Calendar.getInstance(),
+        targetPackage: String? = null
+    ): RestrictionEvaluation {
+        if (restriction == null || !restriction.isEnabled) {
+            return RestrictionEvaluation(
+                isBlocked = false,
+                reason = BlockReason.NONE,
+                consumedMinutes = consumedMinutes,
+                allowedMinutes = restriction?.limitDurationMinutes ?: 0,
+                nextAvailableText = null,
+                restriction = restriction ?: AppRestriction(packageName = "", appName = "")
+            )
+        }
+
+        // فحص التخطي المؤقت للتطبيق المستهدف تحديداً
+        // إذا حُدد تطبيق معين (targetPackage)، نتحقق من التخطي المؤقت لهذا التطبيق فقط!
+        // أما إذا لم يُحدد تطبيق وكان القيد لتطبيق فردي واحد، نتحقق من هذا التطبيق الفردي.
+        // في حالة المجموعة، لا يُرفع الحظر عن باقي تطبيقات المجموعة إذا تم تخطي أحدها فقط.
+        val packageToCheckBypass = when {
+            targetPackage != null -> targetPackage
+            restriction.allPackages.size == 1 -> restriction.allPackages.first()
+            else -> null
+        }
+
+        if (packageToCheckBypass != null && isPackageBypassed(packageToCheckBypass)) {
+            val remainingSec = getTemporaryBypassRemainingSeconds(packageToCheckBypass)
+            val remainingMin = ((remainingSec + 59) / 60).toInt().coerceAtLeast(1)
+            val formattedTime = formatBypassDuration(remainingMin)
+            return RestrictionEvaluation(
+                isBlocked = false,
+                reason = BlockReason.NONE,
+                consumedMinutes = consumedMinutes,
+                allowedMinutes = restriction.limitDurationMinutes,
+                nextAvailableText = "تخطي مؤقت نشط (متبقي $formattedTime)",
+                restriction = restriction
+            )
+        }
+
+        val currentDay = calendar.get(Calendar.DAY_OF_WEEK)
+        val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
+        val currentMinute = calendar.get(Calendar.MINUTE)
+        val currentTotalMinutes = currentHour * 60 + currentMinute
+
+        // 0. فحص الحظر الكامل التام (Total Block)
+        if (restriction.isTotalBlock) {
+            return RestrictionEvaluation(
+                isBlocked = true,
+                reason = BlockReason.TOTAL_BLOCK,
+                consumedMinutes = consumedMinutes,
+                allowedMinutes = 0,
+                nextAvailableText = "التطبيق محظور تمامًا",
+                restriction = restriction
+            )
+        }
+
+        // 1. فحص جدول الأوقات المسموحة (Schedule)
+        if (restriction.hasSchedule && restriction.timeWindows.isNotEmpty()) {
+            val isDayActive = restriction.activeDays.contains(currentDay)
+
+            if (!isDayActive) {
+                // اليوم الحالي غير مسموح بالاستخدام فيه
+                val nextDay = findNextActiveDay(currentDay, restriction.activeDays)
+                val firstWindow = restriction.timeWindows.minByOrNull { it.startHour * 60 + it.startMinute }
+                val nextTime = if (firstWindow != null) {
+                    "يوم ${AppRestriction.getDayNameAr(nextDay)} في تمام الساعة %02d:%02d".format(
+                        Locale.getDefault(),
+                        firstWindow.startHour,
+                        firstWindow.startMinute
+                    )
+                } else {
+                    "يوم ${AppRestriction.getDayNameAr(nextDay)}"
+                }
+
+                return RestrictionEvaluation(
+                    isBlocked = true,
+                    reason = BlockReason.OUTSIDE_SCHEDULE,
+                    consumedMinutes = consumedMinutes,
+                    allowedMinutes = restriction.limitDurationMinutes,
+                    nextAvailableText = nextTime,
+                    restriction = restriction
+                )
+            }
+
+            // اليوم نشط، نتحقق من مطابقة أي من النوافذ الزمنية المسموحة
+            val isInsideAllowedWindow = restriction.timeWindows.any { it.contains(currentHour, currentMinute) }
+
+            if (!isInsideAllowedWindow) {
+                val nextWindowToday = restriction.timeWindows
+                    .filter { (it.startHour * 60 + it.startMinute) > currentTotalMinutes }
+                    .minByOrNull { it.startHour * 60 + it.startMinute }
+
+                val nextTime = if (nextWindowToday != null) {
+                    "اليوم في تمام الساعة %02d:%02d".format(Locale.getDefault(), nextWindowToday.startHour, nextWindowToday.startMinute)
+                } else {
+                    // أول نافذة في اليوم النشط القادم
+                    val nextDay = findNextActiveDay(currentDay, restriction.activeDays)
+                    val firstWindow = restriction.timeWindows.minByOrNull { it.startHour * 60 + it.startMinute }
+                    if (firstWindow != null) {
+                        "غداً في تمام الساعة %02d:%02d".format(Locale.getDefault(), firstWindow.startHour, firstWindow.startMinute)
+                    } else {
+                        "في الفترة المسموحة القادمة"
+                    }
+                }
+
+                return RestrictionEvaluation(
+                    isBlocked = true,
+                    reason = BlockReason.OUTSIDE_SCHEDULE,
+                    consumedMinutes = consumedMinutes,
+                    allowedMinutes = restriction.limitDurationMinutes,
+                    nextAvailableText = nextTime,
+                    restriction = restriction
+                )
+            }
+        }
+
+        // 2. فحص حد الاستخدام (Usage Limit)
+        if (restriction.hasUsageLimit) {
+            val allowedMinutes = restriction.limitDurationMinutes
+            if (consumedMinutes >= allowedMinutes) {
+                val nextTime = if (restriction.limitPeriod == LimitPeriod.DAILY) {
+                    "غداً عند منتصف الليل (00:00)"
+                } else {
+                    "بداية الأسبوع القادم"
+                }
+
+                return RestrictionEvaluation(
+                    isBlocked = true,
+                    reason = BlockReason.LIMIT_EXCEEDED,
+                    consumedMinutes = consumedMinutes,
+                    allowedMinutes = allowedMinutes,
+                    nextAvailableText = nextTime,
+                    restriction = restriction
+                )
+            }
+        }
+
+        // اجتاز كافة الشروط، التطبيق متاح
+        return RestrictionEvaluation(
+            isBlocked = false,
+            reason = BlockReason.NONE,
+            consumedMinutes = consumedMinutes,
+            allowedMinutes = restriction.limitDurationMinutes,
+            nextAvailableText = null,
+            restriction = restriction
+        )
+    }
+
+    private fun findNextActiveDay(currentDay: Int, activeDays: Set<Int>): Int {
+        for (i in 1..7) {
+            val next = ((currentDay - 1 + i) % 7) + 1
+            if (activeDays.contains(next)) return next
+        }
+        return currentDay
+    }
+
+    /**
+     * حساب الدقائق المستهلكة بدقة عالية في الوقت الحقيقي لتطبيق أو مجموعة تطبيقات
+     */
+    fun calculateConsumedMinutes(context: Context, restriction: AppRestriction): Int {
+        if (restriction.isTotalBlock) return 0
+
+        val calendar = Calendar.getInstance()
+        val now = System.currentTimeMillis()
+
+        val startTime = when (restriction.limitPeriod) {
+            LimitPeriod.DAILY -> {
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                calendar.timeInMillis
+            }
+            LimitPeriod.WEEKLY -> {
+                calendar.add(Calendar.DAY_OF_YEAR, -6)
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                calendar.timeInMillis
+            }
+        }
+
+        val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager ?: return 0
+        val targetPackages = restriction.allPackages.toSet()
+        var totalDurationMs = 0L
+
+        try {
+            val events = usageStatsManager.queryEvents(startTime, now)
+            val event = android.app.usage.UsageEvents.Event()
+            val startTimes = mutableMapOf<String, Long>()
+
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                val pkg = event.packageName ?: continue
+                if (!targetPackages.contains(pkg)) continue
+
+                val time = event.timeStamp
+                if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ||
+                    (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && event.eventType == 29)
+                ) {
+                    startTimes[pkg] = time
+                } else if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED ||
+                    event.eventType == android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE ||
+                    (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && event.eventType == 30)
+                ) {
+                    val start = startTimes.remove(pkg)
+                    if (start != null && time > start) {
+                        totalDurationMs += (time - start)
+                    }
+                }
+            }
+
+            for ((_, start) in startTimes) {
+                if (now > start) {
+                    totalDurationMs += (now - start)
+                }
+            }
+        } catch (e: Exception) {
+            try {
+                val stats = usageStatsManager.queryUsageStats(
+                    android.app.usage.UsageStatsManager.INTERVAL_BEST,
+                    startTime,
+                    now
+                )
+                stats?.filter { targetPackages.contains(it.packageName) }?.forEach {
+                    totalDurationMs += it.totalTimeInForeground
+                }
+            } catch (ex: Exception) {}
+        }
+
+        return (totalDurationMs / 60000L).toInt()
+    }
+}
