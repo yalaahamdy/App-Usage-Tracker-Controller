@@ -104,7 +104,19 @@ data class AppRestriction(
      * التحقق مما إذا كان القيد ينطبق على حزمة معينة
      */
     fun appliesTo(pkg: String): Boolean {
-        return allPackages.contains(pkg)
+        if (allPackages.contains(pkg)) return true
+        // إذا كان قيد الحظر يشمل تطبيق الضبط، نطبق الحظر على جميع الشاشات والخدمات والأنشطة التابعة للضبط
+        if (allPackages.contains("com.android.settings")) {
+            if (pkg == "com.google.android.settings.intelligence" ||
+                pkg == "com.android.settings.intelligence" ||
+                pkg.startsWith("com.android.settings.") ||
+                pkg.startsWith("com.google.android.settings.") ||
+                pkg.startsWith("com.samsung.android.settings")
+            ) {
+                return true
+            }
+        }
+        return false
     }
 
     fun toJsonObject(): JSONObject {

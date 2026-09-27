@@ -100,26 +100,45 @@ class MuraqibAccessibilityService : AccessibilityService() {
 
         val pkgName = event.packageName?.toString() ?: return
 
-        // إذا كان هناك نافذة حظر معروضة لتطبيق معين، ولكن المستخدم غادر هذا التطبيق وانتقل لتطبيق آخر
+        // 1. استبعاد تطبيقنا وشاشات النظام ولوحات المفاتيح فوراً قبل فحص إغلاق النافذة
+        if (isIgnoredSystemPackage(pkgName)) {
+            return
+        }
+
+        // 2. إذا كان هناك نافذة حظر معروضة لتطبيق معين، ولكن المستخدم غادر هذا التطبيق وانتقل لتطبيق آخر مختلف
         if (BlockOverlayManager.isShowing &&
             BlockOverlayManager.currentShowingPackage != null &&
-            BlockOverlayManager.currentShowingPackage != pkgName &&
-            pkgName != packageName
+            !isSameAppOrSubComponent(BlockOverlayManager.currentShowingPackage!!, pkgName)
         ) {
             BlockOverlayManager.dismiss()
         }
 
-        // استبعاد تطبيقنا وشاشات النظام ولوحات المفاتيح
-        if (pkgName == packageName ||
-            pkgName == "android" ||
-            pkgName.startsWith("com.android.systemui") ||
-            pkgName.startsWith("com.google.android.inputmethod") ||
-            pkgName.startsWith("com.samsung.android.honeyboard")
-        ) {
-            return
-        }
-
         checkAndBlockIfNeeded(pkgName)
+    }
+
+    private fun isIgnoredSystemPackage(pkg: String): Boolean {
+        return pkg == packageName ||
+                pkg == "android" ||
+                pkg.startsWith("com.android.systemui") ||
+                pkg.startsWith("com.google.android.inputmethod") ||
+                pkg.startsWith("com.samsung.android.honeyboard") ||
+                pkg.contains("inputmethod")
+    }
+
+    private fun isSameAppOrSubComponent(currentPkg: String, newPkg: String): Boolean {
+        if (currentPkg == newPkg) return true
+        if (currentPkg == "com.android.settings" || currentPkg.startsWith("com.android.settings.")) {
+            if (newPkg == "com.android.settings" ||
+                newPkg.startsWith("com.android.settings.") ||
+                newPkg.startsWith("com.google.android.settings.") ||
+                newPkg.startsWith("com.samsung.android.settings") ||
+                newPkg == "com.google.android.settings.intelligence" ||
+                newPkg == "com.android.settings.intelligence"
+            ) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun checkAndBlockIfNeeded(targetPackage: String) {
@@ -205,9 +224,10 @@ class MuraqibAccessibilityService : AccessibilityService() {
             try {
                 val windowList = windows
                 for (w in windowList) {
-                    if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION) {
+                    if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION || w.type == AccessibilityWindowInfo.TYPE_SYSTEM) {
                         val node = w.root
-                        if (node != null && node.packageName == targetPackage) {
+                        val nodePkg = node?.packageName?.toString()
+                        if (nodePkg != null && (nodePkg == targetPackage || isSameAppOrSubComponent(targetPackage, nodePkg))) {
                             val rect = Rect()
                             w.getBoundsInScreen(rect)
                             if (rect.width() > 0 && rect.height() > 0) {

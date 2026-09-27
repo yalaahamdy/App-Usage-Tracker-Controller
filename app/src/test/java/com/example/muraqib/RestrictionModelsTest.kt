@@ -294,6 +294,39 @@ class RestrictionModelsTest {
         assertEquals(BlockReason.TOTAL_BLOCK, evalInstagram.reason)
     }
 
+    @Test
+    fun testSettingsAppBlockingInGroup() {
+        val repo = AppRestrictionsRepositoryMock()
+        val groupWithSettings = AppRestriction(
+            packageName = "com.google.android.youtube",
+            appName = "مجموعة الحظر الكلي مع الضبط",
+            isEnabled = true,
+            isTotalBlock = true,
+            targetPackages = listOf("com.google.android.youtube", "com.android.settings", "com.zhiliaoapp.musically")
+        )
+
+        // التحقق من مطابقة appliesTo لتطبيق الضبط والشاشات والخدمات التابعة له
+        assertTrue(groupWithSettings.appliesTo("com.android.settings"))
+        assertTrue(groupWithSettings.appliesTo("com.android.settings.intelligence"))
+        assertTrue(groupWithSettings.appliesTo("com.google.android.settings.intelligence"))
+        assertTrue(groupWithSettings.appliesTo("com.android.settings.wifi.WifiSettings"))
+
+        // تقييم حظر تطبيق الضبط الرئيسي
+        val evalSettings = repo.evaluate(groupWithSettings, consumedMinutes = 0, targetPackage = "com.android.settings")
+        assertTrue(evalSettings.isBlocked)
+        assertEquals(BlockReason.TOTAL_BLOCK, evalSettings.reason)
+
+        // تقييم حظر شاشة فرعية أو بحث الضبط
+        val evalSubSettings = repo.evaluate(groupWithSettings, consumedMinutes = 0, targetPackage = "com.google.android.settings.intelligence")
+        assertTrue(evalSubSettings.isBlocked)
+        assertEquals(BlockReason.TOTAL_BLOCK, evalSubSettings.reason)
+
+        // تقييم بقية تطبيقات المجموعة
+        val evalYouTube = repo.evaluate(groupWithSettings, consumedMinutes = 0, targetPackage = "com.google.android.youtube")
+        assertTrue(evalYouTube.isBlocked)
+        assertEquals(BlockReason.TOTAL_BLOCK, evalYouTube.reason)
+    }
+
     /**
      * فئة مساعدة لاختبار منطق التقييم دون الاعتماد على Android Context
      */

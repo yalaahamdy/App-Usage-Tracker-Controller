@@ -217,8 +217,9 @@ class AppBlockerService : Service() {
 
             val appName = appInfoManager.getAppName(topPackage)
             val canDrawOverlay = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+            val isSettingsApp = topPackage == "com.android.settings" || topPackage.startsWith("com.android.settings.")
 
-            if (canDrawOverlay) {
+            if (canDrawOverlay && !isSettingsApp) {
                 // إظهار النافذة العائمة فوق التطبيق المحظور مباشرة
                 BlockOverlayManager.show(
                     context = this,

@@ -214,7 +214,21 @@ class AppRestrictionsRepository(context: Context) {
         // أما إذا لم يُحدد تطبيق وكان القيد لتطبيق فردي واحد، نتحقق من هذا التطبيق الفردي.
         // في حالة المجموعة، لا يُرفع الحظر عن باقي تطبيقات المجموعة إذا تم تخطي أحدها فقط.
         val packageToCheckBypass = when {
-            targetPackage != null -> targetPackage
+            targetPackage != null -> {
+                if (restriction.allPackages.contains(targetPackage)) {
+                    targetPackage
+                } else if (restriction.allPackages.contains("com.android.settings") &&
+                    (targetPackage.startsWith("com.android.settings.") ||
+                     targetPackage.startsWith("com.google.android.settings.") ||
+                     targetPackage.startsWith("com.samsung.android.settings") ||
+                     targetPackage == "com.google.android.settings.intelligence" ||
+                     targetPackage == "com.android.settings.intelligence")
+                ) {
+                    "com.android.settings"
+                } else {
+                    targetPackage
+                }
+            }
             restriction.allPackages.size == 1 -> restriction.allPackages.first()
             else -> null
         }

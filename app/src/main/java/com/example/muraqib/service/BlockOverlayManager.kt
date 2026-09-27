@@ -30,6 +30,7 @@ import com.example.muraqib.MainActivity
 import com.example.muraqib.data.repository.AppInfoManager
 import com.example.muraqib.data.repository.AppRestrictionsRepository
 import com.example.muraqib.data.repository.SecurityRepository
+import com.example.muraqib.ui.block.BlockActivity
 
 /**
  * مدير النافذة العائمة فوق التطبيقات المحظورة
@@ -953,9 +954,8 @@ object BlockOverlayManager {
                         WindowManager.LayoutParams.MATCH_PARENT,
                         WindowManager.LayoutParams.MATCH_PARENT,
                         windowType,
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                         PixelFormat.TRANSLUCENT
                     ).apply {
                         gravity = Gravity.CENTER
@@ -966,7 +966,28 @@ object BlockOverlayManager {
                 overlayRootView = rootView
                 currentShowingPackage = packageName
             } catch (e: Exception) {
-                // منع أي انهيار
+                // خطة أمان بديلة: إذا تعذر إضافة النافذة العائمة فوق هذا التطبيق، نطلق شاشة الحظر الكاملة
+                try {
+                    if (onHomeAction != null) {
+                        onHomeAction.invoke()
+                    } else {
+                        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                            addCategory(Intent.CATEGORY_HOME)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        context.startActivity(homeIntent)
+                    }
+                    val blockIntent = BlockActivity.createIntent(
+                        context = context,
+                        packageName = packageName,
+                        appName = appName,
+                        reason = reason,
+                        nextAvailable = nextAvailable,
+                        consumedMinutes = 0,
+                        allowedMinutes = 0
+                    )
+                    context.startActivity(blockIntent)
+                } catch (ex: Exception) {}
             }
         }
     }
