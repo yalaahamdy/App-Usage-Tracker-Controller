@@ -233,6 +233,7 @@ fun MainAppNavigation(
                             is AppScreen.Settings -> {
                                 SettingsScreen(
                                     securityRepository = viewModel.securityRepository,
+                                    restrictionsRepo = viewModel.restrictionsRepo,
                                     onBackClick = { viewModel.navigateBack() }
                                 )
                             }

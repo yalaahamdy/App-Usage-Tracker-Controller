@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,26 +23,34 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -58,27 +67,44 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.muraqib.R
+import com.example.muraqib.data.repository.AppRestrictionsRepository
+import com.example.muraqib.data.repository.BackupRepository
+import com.example.muraqib.data.repository.BackupValidationResult
+import com.example.muraqib.data.repository.ImportMode
 import com.example.muraqib.data.repository.SecurityRepository
 import com.example.muraqib.receiver.MuraqibDeviceAdminReceiver
 import com.example.muraqib.theme.ErrorRed
 import com.example.muraqib.theme.SuccessGreen
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.nio.charset.StandardCharsets
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * شاشة إعدادات الأمان وحماية التطبيق
+ * شاشة إعدادات الأمان وحماية التطبيق والنسخ الاحتياطي
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     securityRepository: SecurityRepository,
     onBackClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    restrictionsRepo: AppRestrictionsRepository? = null
 ) {
     val context = LocalContext.current
+    val effectiveRestrictionsRepo = restrictionsRepo ?: remember(context) { AppRestrictionsRepository.getInstance(context) }
+    val backupRepo = remember(context, effectiveRestrictionsRepo, securityRepository) {
+        BackupRepository(context, effectiveRestrictionsRepo, securityRepository)
+    }
+
     var showChangePinDialog by remember { mutableStateOf(false) }
     var showUpdateQuestionDialog by remember { mutableStateOf(false) }
     var feedbackMessage by remember { mutableStateOf<String?>(null) }
@@ -93,6 +119,9 @@ fun SettingsScreen(
     var pendingPinTitle by remember { mutableStateOf("") }
     var pendingPinDescription by remember { mutableStateOf("") }
 
+    var pendingValidationResult by remember { mutableStateOf<BackupValidationResult?>(null) }
+    var importErrorMessage by remember { mutableStateOf<String?>(null) }
+
     val deviceAdminLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
@@ -100,6 +129,45 @@ fun SettingsScreen(
         isDeviceAdminActive = active
         if (active) {
             feedbackMessage = "تم تفعيل صلاحية مسؤول الجهاز وحماية التطبيق بنجاح"
+        }
+    }
+
+    // مشغل حفظ وتصدير ملف النسخة الاحتياطية عبر Storage Access Framework
+    val exportFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    val json = backupRepo.exportBackupJson()
+                    out.write(json.toByteArray(StandardCharsets.UTF_8))
+                    out.flush()
+                }
+                feedbackMessage = "تم حفظ وتصدير النسخة الاحتياطية بنجاح"
+            } catch (e: Exception) {
+                importErrorMessage = "فشل تصدير الملف: ${e.localizedMessage ?: "حدث خطأ أثناء كتابة الملف"}"
+            }
+        }
+    }
+
+    // مشغل فتح ملف لاستيراد النسخة الاحتياطية عبر Storage Access Framework
+    val importFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val content = context.contentResolver.openInputStream(uri)?.use { input ->
+                    BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).readText()
+                } ?: ""
+                val validation = backupRepo.validateBackupJson(content)
+                if (validation.isValid) {
+                    pendingValidationResult = validation
+                } else {
+                    importErrorMessage = validation.errorMessage ?: "ملف النسخة الاحتياطية غير صالح"
+                }
+            } catch (e: Exception) {
+                importErrorMessage = "تعذر قراءة الملف المحدد: ${e.localizedMessage ?: "حدث خطأ أثناء فتح الملف"}"
+            }
         }
     }
 
@@ -458,6 +526,165 @@ fun SettingsScreen(
                 }
             }
 
+            // قسم النسخ الاحتياطي واستيراد البيانات
+            Text(
+                text = "النسخ الاحتياطي ونقل البيانات",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column {
+                    // تصدير البيانات والإعدادات
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FileDownload,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "تصدير البيانات والإعدادات",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "حفظ نسخة احتياطية من جميع القيود والمجموعات وإعدادات الأمان في ملف بصيغة JSON",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        requestPinConfirmation(
+                                            title = "تأكيد تصدير البيانات",
+                                            description = "أدخل رمز المرور لتأكيد حفظ النسخة الاحتياطية:"
+                                        ) {
+                                            val dateStr = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
+                                            exportFileLauncher.launch("muraqib_backup_$dateStr.json")
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("حفظ كملف", style = MaterialTheme.typography.labelMedium)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        requestPinConfirmation(
+                                            title = "تأكيد مشاركة النسخة الاحتياطية",
+                                            description = "أدخل رمز المرور لتأكيد مشاركة ملف البيانات:"
+                                        ) {
+                                            try {
+                                                val file = backupRepo.createShareableBackupFile()
+                                                val uri = backupRepo.getShareableBackupUri(file)
+                                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "application/json"
+                                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                context.startActivity(
+                                                    Intent.createChooser(shareIntent, "مشاركة النسخة الاحتياطية لمراقب")
+                                                )
+                                            } catch (e: Exception) {
+                                                importErrorMessage = "تعذر مشاركة الملف: ${e.localizedMessage}"
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("مشاركة", style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+
+                    // استيراد البيانات والإعدادات
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FileUpload,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "استيراد البيانات والإعدادات",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "استعادة القيود والمجموعات من ملف نسخة احتياطية سابق مع خيار الدمج أو الاستبدال",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Button(
+                                onClick = {
+                                    importFileLauncher.launch(
+                                        arrayOf("application/json", "text/*", "*/*")
+                                    )
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("اختيار ملف للاستيراد", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+            }
+
             Text(
                 text = "عن التطبيق",
                 style = MaterialTheme.typography.titleSmall,
@@ -524,6 +751,42 @@ fun SettingsScreen(
             onSuccess = {
                 showUpdateQuestionDialog = false
                 feedbackMessage = "تم تحديث سؤال الأمان بنجاح"
+            }
+        )
+    }
+
+    // نافذة معاينة واستيراد النسخة الاحتياطية
+    if (pendingValidationResult != null) {
+        ImportConfirmationDialog(
+            validationResult = pendingValidationResult!!,
+            securityRepository = securityRepository,
+            onDismiss = { pendingValidationResult = null },
+            onConfirmImport = { mode, importSecurity ->
+                val result = backupRepo.importBackup(
+                    validationResult = pendingValidationResult!!,
+                    mode = mode,
+                    importSecuritySettings = importSecurity
+                )
+                pendingValidationResult = null
+                if (result.success) {
+                    feedbackMessage = result.message
+                } else {
+                    importErrorMessage = result.message
+                }
+            }
+        )
+    }
+
+    // نافذة عرض رسائل الخطأ والتنبيهات
+    if (importErrorMessage != null) {
+        AlertDialog(
+            onDismissRequest = { importErrorMessage = null },
+            title = { Text(text = "تنبيه", fontWeight = FontWeight.Bold) },
+            text = { Text(text = importErrorMessage!!) },
+            confirmButton = {
+                Button(onClick = { importErrorMessage = null }) {
+                    Text("حسناً")
+                }
             }
         )
     }
@@ -750,6 +1013,211 @@ private fun ConfirmActionPinDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("إلغاء") }
+        }
+    )
+}
+
+@Composable
+private fun ImportConfirmationDialog(
+    validationResult: BackupValidationResult,
+    securityRepository: SecurityRepository,
+    onDismiss: () -> Unit,
+    onConfirmImport: (ImportMode, Boolean) -> Unit
+) {
+    var selectedMode by remember { mutableStateOf(ImportMode.MERGE) }
+    var importSecuritySettings by remember { mutableStateOf(validationResult.metadata?.hasSecuritySettings == true) }
+    var pin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    val isAppLockEnabled = securityRepository.isAppLockEnabled()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "تأكيد استيراد البيانات", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // ملخص النسخة الاحتياطية
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "تفاصيل النسخة الاحتياطية:",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "تاريخ الإنشاء: ${validationResult.metadata?.exportedAtFormatted ?: "غير معروف"}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text = "عدد القيود والمجموعات: ${validationResult.restrictions.size}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        if (validationResult.metadata?.hasSecuritySettings == true) {
+                            Text(
+                                text = "تحتوي على إعدادات أمان ورمز مرور",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                    }
+                }
+
+                // اختيار وضع الاستيراد
+                Text(
+                    text = "طريقة الاستيراد:",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                // خيار الدمج
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (selectedMode == ImportMode.MERGE) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent,
+                    border = BorderStroke(1.dp, if (selectedMode == ImportMode.MERGE) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { selectedMode = ImportMode.MERGE }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        RadioButton(
+                            selected = selectedMode == ImportMode.MERGE,
+                            onClick = { selectedMode = ImportMode.MERGE }
+                        )
+                        Column {
+                            Text(
+                                text = ImportMode.MERGE.titleAr,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = ImportMode.MERGE.descriptionAr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // خيار الاستبدال الكامل
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (selectedMode == ImportMode.REPLACE_ALL) ErrorRed.copy(alpha = 0.1f) else Color.Transparent,
+                    border = BorderStroke(1.dp, if (selectedMode == ImportMode.REPLACE_ALL) ErrorRed else MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { selectedMode = ImportMode.REPLACE_ALL }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        RadioButton(
+                            selected = selectedMode == ImportMode.REPLACE_ALL,
+                            onClick = { selectedMode = ImportMode.REPLACE_ALL },
+                            colors = RadioButtonDefaults.colors(selectedColor = ErrorRed)
+                        )
+                        Column {
+                            Text(
+                                text = ImportMode.REPLACE_ALL.titleAr,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (selectedMode == ImportMode.REPLACE_ALL) ErrorRed else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = ImportMode.REPLACE_ALL.descriptionAr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // خيار استيراد إعدادات الأمان
+                if (validationResult.metadata?.hasSecuritySettings == true) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { importSecuritySettings = !importSecuritySettings }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Checkbox(
+                            checked = importSecuritySettings,
+                            onCheckedChange = { importSecuritySettings = it }
+                        )
+                        Text(
+                            text = "استيراد إعدادات الأمان (رمز المرور وسؤال الأمان)",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+
+                // حقل التحقق من رمز المرور إذا كان القفل مفعلاً
+                if (isAppLockEnabled) {
+                    Text(
+                        text = "أدخل رمز المرور الحالي لتأكيد الاستيراد:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = pin,
+                        onValueChange = { if (it.length <= 4) pin = it },
+                        label = { Text("رمز المرور (PIN)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                if (error != null) {
+                    Text(
+                        text = error!!,
+                        color = ErrorRed,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (isAppLockEnabled) {
+                        if (pin.length != 4) {
+                            error = "يجب إدخال رمز المرور المكون من 4 أرقام"
+                            return@Button
+                        }
+                        if (!securityRepository.verifyPin(pin)) {
+                            error = "رمز المرور غير صحيح"
+                            return@Button
+                        }
+                    }
+                    onConfirmImport(selectedMode, importSecuritySettings)
+                }
+            ) {
+                Text("بدء الاستيراد")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إلغاء")
+            }
         }
     )
 }

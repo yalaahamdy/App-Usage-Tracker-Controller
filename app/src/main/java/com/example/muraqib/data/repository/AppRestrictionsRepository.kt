@@ -140,6 +140,36 @@ class AppRestrictionsRepository(context: Context) {
     }
 
     /**
+     * استبدال كامل للقيود (تستخدم عند استيراد نسخة احتياطية في وضع الاستبدال)
+     */
+    fun replaceAllRestrictions(newList: List<AppRestriction>) {
+        persistRestrictions(newList)
+    }
+
+    /**
+     * دمج قيود مستوردة مع القيود الحالية مع تحديث المتطابق منها وإضافة الجديد
+     * يعيد عدد القيود التي تم دمجها
+     */
+    fun mergeRestrictions(importedList: List<AppRestriction>): Int {
+        val currentList = _restrictionsFlow.value.toMutableList()
+        var mergedCount = 0
+
+        for (imported in importedList) {
+            val existingIndex = currentList.indexOfFirst {
+                it.id == imported.id || (it.allPackages.toSet() == imported.allPackages.toSet() && it.allPackages.isNotEmpty())
+            }
+            if (existingIndex >= 0) {
+                currentList[existingIndex] = imported
+            } else {
+                currentList.add(imported)
+            }
+            mergedCount++
+        }
+        persistRestrictions(currentList)
+        return mergedCount
+    }
+
+    /**
      * تفعيل تخطي الحظر المؤقت لتطبيق معين لعدد محدد من الدقائق لمرة واحدة
      */
     fun setTemporaryBypass(packageName: String, durationMinutes: Int) {
