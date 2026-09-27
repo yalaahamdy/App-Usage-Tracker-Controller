@@ -111,6 +111,7 @@ fun SettingsScreen(
     var isAppLockEnabled by remember { mutableStateOf(securityRepository.isAppLockEnabled()) }
     var isAntiTamperEnabled by remember { mutableStateOf(securityRepository.isAntiTamperEnabled()) }
     var isAntiUninstallEnabled by remember { mutableStateOf(securityRepository.isAntiUninstallEnabled()) }
+    var isSafeModeProtectionEnabled by remember { mutableStateOf(securityRepository.isSafeModeProtectionEnabled()) }
     var isDeviceAdminActive by remember {
         mutableStateOf(MuraqibDeviceAdminReceiver.isDeviceAdminActive(context))
     }
@@ -519,6 +520,71 @@ fun SettingsScreen(
                                     securityRepository.setAntiUninstallEnabled(true)
                                     isAntiUninstallEnabled = true
                                     feedbackMessage = "تم تفعيل الاعتراض الذكي لإلغاء التثبيت"
+                                }
+                            }
+                        )
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+
+                    // الحماية ضد الوضع الآمن وتدقيق الإقلاع (Safe Mode Protection)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "الحماية ضد الوضع الآمن وتدقيق الإقلاع",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (isSafeModeProtectionEnabled)
+                                    "مفعل - يرصد إقلاع الجهاز في الوضع الآمن ويحتسب أي استخدام غير مصرح به للتطبيقات المقيدة"
+                                else
+                                    "معطل - لن يتم تدقيق الإقلاع في الوضع الآمن",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Switch(
+                            checked = isSafeModeProtectionEnabled,
+                            onCheckedChange = { checked ->
+                                if (!checked) {
+                                    requestPinConfirmation(
+                                        title = "تأكيد تعطيل حماية الوضع الآمن",
+                                        description = "يرجى إدخال رمز المرور لتأكيد تعطيل تدقيق الوضع الآمن:"
+                                    ) {
+                                        securityRepository.setSafeModeProtectionEnabled(false)
+                                        isSafeModeProtectionEnabled = false
+                                        feedbackMessage = "تم تعطيل حماية الوضع الآمن"
+                                    }
+                                } else {
+                                    securityRepository.setSafeModeProtectionEnabled(true)
+                                    isSafeModeProtectionEnabled = true
+                                    feedbackMessage = "تم تفعيل حماية الوضع الآمن وتدقيق الإقلاع"
                                 }
                             }
                         )

@@ -70,6 +70,8 @@ fun MainAppNavigation(
     val dataUsageOverview by viewModel.dataUsageOverview.collectAsStateWithLifecycle()
     val isDataLoading by viewModel.isDataLoading.collectAsStateWithLifecycle()
     val dataNetworkFilter by viewModel.dataNetworkFilter.collectAsStateWithLifecycle()
+    val isSafeModeViolation by viewModel.isSafeModeViolation.collectAsStateWithLifecycle()
+    val safeModeViolationMessage by viewModel.safeModeViolationMessage.collectAsStateWithLifecycle()
 
     // دعم كامل وأصيل لاتجاه الكتابة العربي (RTL)
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -105,6 +107,34 @@ fun MainAppNavigation(
                 else -> {
                     BackHandler(enabled = currentScreen != AppScreen.MainContainer) {
                         viewModel.navigateBack()
+                    }
+
+                    // تنبيه فحص الإقلاع والوضع الآمن
+                    if (isSafeModeViolation) {
+                        AlertDialog(
+                            onDismissRequest = { /* إجبار المستخدم على الضغط على تأكيد */ },
+                            title = {
+                                Text(
+                                    text = "تنبيه أمان - فحص الإقلاع والوضع الآمن",
+                                    fontWeight = FontWeight.Bold,
+                                    color = ErrorRed
+                                )
+                            },
+                            text = {
+                                Text(
+                                    text = safeModeViolationMessage
+                                        ?: "تم رصد تشغيل الهاتف في الوضع الآمن أو استخدام تطبيقات مقيدة أثناء توقف الحماية.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = { viewModel.dismissSafeModeViolation() }
+                                ) {
+                                    Text("تأكيد ومتابعة")
+                                }
+                            }
+                        )
                     }
 
                     AnimatedContent(

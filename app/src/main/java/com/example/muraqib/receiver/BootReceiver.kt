@@ -19,11 +19,18 @@ class BootReceiver : BroadcastReceiver() {
             action == "com.htc.intent.action.QUICKBOOT_POWERON"
         ) {
             try {
+                // تدقيق أمني لحالة الوضع الآمن ورصد أي استخدام للتطبيقات المقيدة أثناء الإقلاع
+                val auditResult = com.example.muraqib.security.SafeModeManager.performBootAudit(context)
+
                 val repo = AppRestrictionsRepository.getInstance(context)
                 val securityRepo = com.example.muraqib.data.repository.SecurityRepository(context)
                 val hasActiveRestrictions = repo.getAllRestrictions().any { it.isEnabled }
-                val hasProtection = securityRepo.isAppLockEnabled() || securityRepo.isAntiTamperEnabled() || securityRepo.isAntiUninstallEnabled()
-                if (hasActiveRestrictions || hasProtection) {
+                val hasProtection = securityRepo.isAppLockEnabled() ||
+                        securityRepo.isAntiTamperEnabled() ||
+                        securityRepo.isAntiUninstallEnabled() ||
+                        securityRepo.isSafeModeProtectionEnabled()
+
+                if (hasActiveRestrictions || hasProtection || auditResult.hasUnauthorizedUsageDuringOffline || auditResult.isCurrentlyInSafeMode) {
                     AppBlockerService.start(context)
                 }
             } catch (e: Exception) {

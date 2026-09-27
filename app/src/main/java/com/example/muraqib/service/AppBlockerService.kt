@@ -42,9 +42,11 @@ class AppBlockerService : Service() {
     private lateinit var appInfoManager: AppInfoManager
     private lateinit var usageStatsManager: UsageStatsManager
     private lateinit var powerManager: PowerManager
+    private lateinit var securityRepo: com.example.muraqib.data.repository.SecurityRepository
 
     private var lastBlockedPackage: String? = null
     private var lastBlockTimestamp: Long = 0L
+    private var lastHeartbeatTime: Long = 0L
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "muraqib_blocker_channel"
@@ -75,6 +77,7 @@ class AppBlockerService : Service() {
         appInfoManager = AppInfoManager(this)
         usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        securityRepo = com.example.muraqib.data.repository.SecurityRepository(this)
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildForegroundNotification())
@@ -124,6 +127,12 @@ class AppBlockerService : Service() {
         serviceScope.launch {
             while (isActive) {
                 try {
+                    val now = System.currentTimeMillis()
+                    if (now - lastHeartbeatTime > 10_000L) {
+                        lastHeartbeatTime = now
+                        securityRepo.recordHeartbeat()
+                    }
+
                     // إذا كانت الشاشة مغلقة، ننتظر لتوفير البطارية
                     if (!powerManager.isInteractive) {
                         delay(3000)

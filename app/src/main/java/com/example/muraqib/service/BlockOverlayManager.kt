@@ -60,6 +60,7 @@ object BlockOverlayManager {
         reason: String,
         nextAvailable: String?,
         windowBounds: Rect? = null,
+        isPipMode: Boolean = false,
         onHomeAction: (() -> Unit)? = null,
         onBypassAction: ((Int) -> Unit)? = null
     ) {
@@ -177,7 +178,31 @@ object BlockOverlayManager {
                     gravity = Gravity.CENTER
                     setPadding(0, 0, 0, dpToPx(context, 6))
                 }
-                cardLayout.addView(appNameView)
+                if (isPipMode) {
+                    val pipBadge = TextView(context).apply {
+                        text = "تم رصد وإيقاف التشغيل في نافذة مصغرة (Picture-in-Picture)"
+                        setTextColor(Color.parseColor("#F59E0B"))
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                        typeface = Typeface.DEFAULT_BOLD
+                        gravity = Gravity.CENTER
+                        val vPad = dpToPx(context, 4)
+                        val hPad = dpToPx(context, 12)
+                        setPadding(hPad, vPad, hPad, vPad)
+                        background = GradientDrawable().apply {
+                            cornerRadius = dpToPx(context, 8).toFloat()
+                            setColor(Color.parseColor("#261B0B"))
+                            setStroke(dpToPx(context, 1), Color.parseColor("#D97706"))
+                        }
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            gravity = Gravity.CENTER_HORIZONTAL
+                            bottomMargin = dpToPx(context, 8)
+                        }
+                    }
+                    cardLayout.addView(pipBadge)
+                }
 
                 // سبب الحظر
                 val reasonView = TextView(context).apply {
@@ -934,8 +959,8 @@ object BlockOverlayManager {
                     WindowManager.LayoutParams.TYPE_PHONE
                 }
 
-                // مطابقة حجم وموقع نافذة التطبيق المفتوح لتغطيته بالكامل
-                val params = if (windowBounds != null && windowBounds.width() > 0 && windowBounds.height() > 0) {
+                // مطابقة حجم وموقع نافذة التطبيق المفتوح لتغطيته بالكامل (مع فرض ملء الشاشة إذا كان في وضع PiP)
+                val params = if (!isPipMode && windowBounds != null && windowBounds.width() > 0 && windowBounds.height() > 0) {
                     WindowManager.LayoutParams(
                         windowBounds.width(),
                         windowBounds.height(),

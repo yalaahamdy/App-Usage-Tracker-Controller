@@ -74,6 +74,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLocked = MutableStateFlow(securityRepository.isAppLocked())
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
 
+    private val _isSafeModeViolation = MutableStateFlow(securityRepository.isSafeModeViolationDetected())
+    val isSafeModeViolation: StateFlow<Boolean> = _isSafeModeViolation.asStateFlow()
+
+    private val _safeModeViolationMessage = MutableStateFlow(securityRepository.getSafeModeViolationMessage())
+    val safeModeViolationMessage: StateFlow<String?> = _safeModeViolationMessage.asStateFlow()
+
     // حالة الصلاحيات
     private val _hasPermission = MutableStateFlow(usageRepository.hasUsagePermission())
     val hasPermission: StateFlow<Boolean> = _hasPermission.asStateFlow()
@@ -147,6 +153,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun checkSecurityState() {
         _isPinConfigured.value = securityRepository.isPinConfigured()
         _isLocked.value = securityRepository.isAppLocked()
+        _isSafeModeViolation.value = securityRepository.isSafeModeViolationDetected()
+        _safeModeViolationMessage.value = securityRepository.getSafeModeViolationMessage()
+    }
+
+    fun dismissSafeModeViolation() {
+        securityRepository.clearSafeModeViolation()
+        checkSecurityState()
     }
 
     fun onPinSetupCompleted() {

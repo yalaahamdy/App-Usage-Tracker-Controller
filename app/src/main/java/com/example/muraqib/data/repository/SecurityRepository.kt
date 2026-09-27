@@ -33,6 +33,11 @@ class SecurityRepository(context: Context) {
         private const val KEY_APP_LOCK_ENABLED = "app_lock_enabled"
         private const val KEY_ANTI_TAMPER_ENABLED = "anti_tamper_enabled"
         private const val KEY_ANTI_UNINSTALL_ENABLED = "anti_uninstall_enabled"
+        private const val KEY_SAFE_MODE_PROTECTION_ENABLED = "safe_mode_protection_enabled"
+        private const val KEY_SAFE_MODE_VIOLATION_DETECTED = "safe_mode_violation_detected"
+        private const val KEY_SAFE_MODE_VIOLATION_MESSAGE = "safe_mode_violation_message"
+        private const val KEY_LAST_HEARTBEAT_TIMESTAMP = "last_heartbeat_timestamp"
+        private const val KEY_LAST_BOOT_TIME = "last_boot_time"
 
         private const val MAX_ATTEMPTS_BEFORE_LOCKOUT = 5
         private const val LOCKOUT_DURATION_MS = 30_000L // 30 ثانية
@@ -58,6 +63,63 @@ class SecurityRepository(context: Context) {
 
     fun setAntiUninstallEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_ANTI_UNINSTALL_ENABLED, enabled).apply()
+    }
+
+    /**
+     * التحقق مما إذا كانت ميزة الحماية ضد تجاوز القيود عبر الوضع الآمن مفعلة
+     */
+    fun isSafeModeProtectionEnabled(): Boolean {
+        return prefs.getBoolean(KEY_SAFE_MODE_PROTECTION_ENABLED, true)
+    }
+
+    fun setSafeModeProtectionEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SAFE_MODE_PROTECTION_ENABLED, enabled).apply()
+    }
+
+    /**
+     * تسجيل نبضة نشاط زمنية مستمرة لمراقبة الفترات التي قد يتعطل فيها التطبيق
+     */
+    fun recordHeartbeat() {
+        prefs.edit().putLong(KEY_LAST_HEARTBEAT_TIMESTAMP, System.currentTimeMillis()).apply()
+    }
+
+    fun getLastHeartbeatTimestamp(): Long {
+        return prefs.getLong(KEY_LAST_HEARTBEAT_TIMESTAMP, 0L)
+    }
+
+    fun recordBootTime(bootTime: Long) {
+        prefs.edit().putLong(KEY_LAST_BOOT_TIME, bootTime).apply()
+    }
+
+    fun getLastBootTime(): Long {
+        return prefs.getLong(KEY_LAST_BOOT_TIME, 0L)
+    }
+
+    /**
+     * تسجيل رصد مخالفة أمنية مرتبطة بالوضع الآمن أو تجاوز القيود أثناء توقف الحماية
+     */
+    fun recordSafeModeViolation(message: String) {
+        prefs.edit()
+            .putBoolean(KEY_SAFE_MODE_VIOLATION_DETECTED, true)
+            .putString(KEY_SAFE_MODE_VIOLATION_MESSAGE, message)
+            .apply()
+        // قفل التطبيق فوراً عند اكتشاف مخالفة أمنية
+        isSessionUnlocked = false
+    }
+
+    fun isSafeModeViolationDetected(): Boolean {
+        return prefs.getBoolean(KEY_SAFE_MODE_VIOLATION_DETECTED, false)
+    }
+
+    fun getSafeModeViolationMessage(): String? {
+        return prefs.getString(KEY_SAFE_MODE_VIOLATION_MESSAGE, null)
+    }
+
+    fun clearSafeModeViolation() {
+        prefs.edit()
+            .putBoolean(KEY_SAFE_MODE_VIOLATION_DETECTED, false)
+            .remove(KEY_SAFE_MODE_VIOLATION_MESSAGE)
+            .apply()
     }
 
     /**

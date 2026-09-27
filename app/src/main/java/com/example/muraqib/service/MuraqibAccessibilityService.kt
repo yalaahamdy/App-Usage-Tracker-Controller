@@ -104,10 +104,16 @@ class MuraqibAccessibilityService : AccessibilityService() {
             return
         }
 
-        val pkgName = event.packageName?.toString() ?: return
+        val pkgName = event.packageName?.toString()
 
-        // 1. فحص محاولات تعطيل التطبيق أو إلغاء تثبيته أو مسح بياناته أو إيقافه إجبارياً
-        if (isAttemptingToTamperWithMuraqib(pkgName)) {
+        // 1. تسجيل نبضة النشاط الأمني المستمرة
+        if (!::securityRepo.isInitialized) {
+            securityRepo = SecurityRepository(this)
+        }
+        securityRepo.recordHeartbeat()
+
+        // 2. فحص محاولات تعطيل التطبيق أو إلغاء تثبيته أو مسح بياناته أو إيقافه إجبارياً
+        if (pkgName != null && isAttemptingToTamperWithMuraqib(pkgName)) {
             performGlobalAction(GLOBAL_ACTION_HOME)
             val intent = BlockActivity.createIntent(
                 context = this,
@@ -122,17 +128,73 @@ class MuraqibAccessibilityService : AccessibilityService() {
             return
         }
 
-        // 2. استبعاد تطبيقنا وشاشات النظام ولوحات المفاتيح فوراً قبل فحص إغلاق النافذة
-        if (isIgnoredSystemPackage(pkgName)) {
-            return
+        // 3. فحص كافة النوافذ النشطة والتفاعلية لدعم الشاشات المنقسمة (Split-Screen) ووضع صورة داخل صورة (PiP)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try {
+                if (!::restrictionsRepo.isInitialized) restrictionsRepo = AppRestrictionsRepository.getInstance(this)
+                if (!::appInfoManager.isInitialized) appInfoManager = AppInfoManager(this)
+
+                val windowList = windows
+                var foundBlockedInWindows = false
+
+                for (w in windowList) {
+                    val isPip = isWindowInPip(w)
+                    val isApp = w.type == AccessibilityWindowInfo.TYPE_APPLICATION
+
+                    if (isPip || isApp) {
+                        val nodePkg = w.root?.packageName?.toString() ?: continue
+                        if (isIgnoredSystemPackage(nodePkg)) continue
+
+                        val restriction = restrictionsRepo.getRestrictionForPackage(nodePkg)
+                        if (restriction != null && restriction.isEnabled && !restrictionsRepo.isPackageBypassed(nodePkg)) {
+                            val consumed = calculateConsumedMinutes(restriction)
+                            val eval = restrictionsRepo.evaluateRestriction(restriction, consumed, Calendar.getInstance(), nodePkg)
+                            if (eval.isBlocked) {
+                                foundBlockedInWindows = true
+                                if (isPip) {
+                                    performGlobalAction(GLOBAL_ACTION_HOME)
+                                }
+                                val rect = Rect()
+                                w.getBoundsInScreen(rect)
+                                val appName = appInfoManager.getAppName(nodePkg)
+                                BlockOverlayManager.show(
+                                    context = this,
+                                    packageName = nodePkg,
+                                    appName = appName,
+                                    reason = eval.detailedReasonText,
+                                    nextAvailable = eval.nextAvailableText,
+                                    windowBounds = if (!isPip && rect.width() > 0 && rect.height() > 0) rect else null,
+                                    isPipMode = isPip,
+                                    onHomeAction = {
+                                        if (isPip) performGlobalAction(GLOBAL_ACTION_HOME) else performGlobalAction(GLOBAL_ACTION_BACK)
+                                    },
+                                    onBypassAction = { durationMinutes ->
+                                        scheduleBypassExpiration(nodePkg, durationMinutes)
+                                    }
+                                )
+                                break
+                            }
+                        }
+                    }
+                }
+
+                // إدارة إغلاق نافذة الحظر فقط إذا لم يعد التطبيق المحظور ظاهراً في أي من النوافذ النشطة
+                if (BlockOverlayManager.isShowing && BlockOverlayManager.currentShowingPackage != null) {
+                    val showingPkg = BlockOverlayManager.currentShowingPackage!!
+                    val isStillVisibleInAnyWindow = windowList.any { w ->
+                        val p = w.root?.packageName?.toString()
+                        p != null && (p == showingPkg || isSameAppOrSubComponent(showingPkg, p))
+                    }
+                    if (!isStillVisibleInAnyWindow && !foundBlockedInWindows) {
+                        BlockOverlayManager.dismiss()
+                    }
+                }
+            } catch (e: Exception) {}
         }
 
-        // 3. إذا كان هناك نافذة حظر معروضة لتطبيق معين، ولكن المستخدم غادر هذا التطبيق وانتقل لتطبيق آخر مختلف
-        if (BlockOverlayManager.isShowing &&
-            BlockOverlayManager.currentShowingPackage != null &&
-            !isSameAppOrSubComponent(BlockOverlayManager.currentShowingPackage!!, pkgName)
-        ) {
-            BlockOverlayManager.dismiss()
+        // 4. استبعاد تطبيقنا وشاشات النظام ولوحات المفاتيح
+        if (pkgName == null || isIgnoredSystemPackage(pkgName)) {
+            return
         }
 
         checkAndBlockIfNeeded(pkgName)
@@ -294,9 +356,13 @@ class MuraqibAccessibilityService : AccessibilityService() {
             lastBlockTimestamp = now
 
             val appName = appInfoManager.getAppName(targetPackage)
-            val windowBounds = getAppWindowBounds(targetPackage)
+            val isPip = isPackageInPipMode(targetPackage)
+            if (isPip) {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+            val windowBounds = if (isPip) null else getAppWindowBounds(targetPackage)
 
-            // إطلاق النافذة العائمة بنفس حجم نافذة التطبيق المفتوح لتغطيته بالكامل بنظام TYPE_ACCESSIBILITY_OVERLAY
+            // إطلاق النافذة العائمة لتغطية التطبيق بالكامل بنظام TYPE_ACCESSIBILITY_OVERLAY
             BlockOverlayManager.show(
                 context = this,
                 packageName = targetPackage,
@@ -304,6 +370,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
                 reason = evaluation.detailedReasonText,
                 nextAvailable = evaluation.nextAvailableText,
                 windowBounds = windowBounds,
+                isPipMode = isPip,
                 onHomeAction = {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                 },
@@ -344,6 +411,51 @@ class MuraqibAccessibilityService : AccessibilityService() {
             } catch (e: Exception) {}
         }
         return null
+    }
+
+    /**
+     * التحقق مما إذا كانت نافذة معينة في وضع صورة داخل صورة (PiP)
+     * باستخدام الاستعلام المباشر عبر Reflection في API 33+ أو عبر القياس الهندسي للشاشة
+     */
+    private fun isWindowInPip(w: AccessibilityWindowInfo): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        return try {
+            val method = w.javaClass.methods.firstOrNull {
+                it.name == "isInPictureInPictureMode" || it.name == "isInPictureInPicture"
+            }
+            if (method != null) {
+                (method.invoke(w) as? Boolean) ?: false
+            } else {
+                val rect = Rect()
+                w.getBoundsInScreen(rect)
+                val metrics = resources.displayMetrics
+                rect.width() > 0 && rect.height() > 0 &&
+                        rect.width() < (metrics.widthPixels * 0.65f) &&
+                        rect.height() < (metrics.heightPixels * 0.65f)
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * التحقق مما إذا كان التطبيق المحدد يعمل حالياً في وضع صورة داخل صورة (PiP)
+     */
+    private fun isPackageInPipMode(targetPackage: String): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val windowList = windows
+                for (w in windowList) {
+                    if (isWindowInPip(w)) {
+                        val nodePkg = w.root?.packageName?.toString()
+                        if (nodePkg != null && (nodePkg == targetPackage || isSameAppOrSubComponent(targetPackage, nodePkg))) {
+                            return true
+                        }
+                    }
+                }
+            } catch (e: Exception) {}
+        }
+        return false
     }
 
     /**
