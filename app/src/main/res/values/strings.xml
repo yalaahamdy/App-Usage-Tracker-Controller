@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">مراقب الاستخدام</string>
     <string name="accessibility_service_description">تُستخدم هذه الخدمة لاكتشاف تشغيل التطبيقات المقيدة فورياً وتطبيق حدود الاستخدام وجداول الأوقات دون تأخير وبأعلى كفاءة في استهلاك البطارية.</string>
+    <string name="device_admin_description">صلاحية مسؤول الجهاز تمنع إلغاء تثبيت تطبيق مراقب الاستخدام لحماية القيود ونظام الرقابة من التعطيل غير المصرح به.</string>
 </resources>

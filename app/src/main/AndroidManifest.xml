@@ -76,6 +76,23 @@
             </intent-filter>
         </receiver>
 
+        <!-- مستقبل مسؤول الجهاز لمنع إلغاء التثبيت -->
+        <receiver
+            android:name=".receiver.MuraqibDeviceAdminReceiver"
+            android:description="@string/device_admin_description"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_policies" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
+            </intent-filter>
+        </receiver>
+
         <!-- خدمة الوصول المخصصة للحظر الفوري الموثوق (Zero-Delay) -->
         <service
             android:name=".service.MuraqibAccessibilityService"

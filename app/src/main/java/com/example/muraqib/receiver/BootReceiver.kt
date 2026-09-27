@@ -20,8 +20,10 @@ class BootReceiver : BroadcastReceiver() {
         ) {
             try {
                 val repo = AppRestrictionsRepository.getInstance(context)
+                val securityRepo = com.example.muraqib.data.repository.SecurityRepository(context)
                 val hasActiveRestrictions = repo.getAllRestrictions().any { it.isEnabled }
-                if (hasActiveRestrictions) {
+                val hasProtection = securityRepo.isAppLockEnabled() || securityRepo.isAntiTamperEnabled() || securityRepo.isAntiUninstallEnabled()
+                if (hasActiveRestrictions || hasProtection) {
                     AppBlockerService.start(context)
                 }
             } catch (e: Exception) {

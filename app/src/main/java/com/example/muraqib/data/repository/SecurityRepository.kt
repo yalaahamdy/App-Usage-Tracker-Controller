@@ -31,9 +31,33 @@ class SecurityRepository(context: Context) {
         private const val KEY_LOCKOUT_UNTIL = "lockout_until"
         private const val KEY_LOCK_TIMEOUT_SECONDS = "lock_timeout_seconds"
         private const val KEY_APP_LOCK_ENABLED = "app_lock_enabled"
+        private const val KEY_ANTI_TAMPER_ENABLED = "anti_tamper_enabled"
+        private const val KEY_ANTI_UNINSTALL_ENABLED = "anti_uninstall_enabled"
 
         private const val MAX_ATTEMPTS_BEFORE_LOCKOUT = 5
         private const val LOCKOUT_DURATION_MS = 30_000L // 30 ثانية
+    }
+
+    /**
+     * التحقق مما إذا كانت ميزة الحماية الذاتية (منع فتح إعدادات التطبيق أو الإيقاف الإجباري ومسح البيانات) مفعلة
+     */
+    fun isAntiTamperEnabled(): Boolean {
+        return prefs.getBoolean(KEY_ANTI_TAMPER_ENABLED, true)
+    }
+
+    fun setAntiTamperEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ANTI_TAMPER_ENABLED, enabled).apply()
+    }
+
+    /**
+     * التحقق مما إذا كانت ميزة حماية منع إلغاء التثبيت مفعلة
+     */
+    fun isAntiUninstallEnabled(): Boolean {
+        return prefs.getBoolean(KEY_ANTI_UNINSTALL_ENABLED, true)
+    }
+
+    fun setAntiUninstallEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ANTI_UNINSTALL_ENABLED, enabled).apply()
     }
 
     /**

@@ -17,14 +17,18 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.core.app.NotificationCompat
+import com.example.muraqib.R
 import com.example.muraqib.data.model.AppRestriction
 import com.example.muraqib.data.model.LimitPeriod
 import com.example.muraqib.data.repository.AppInfoManager
 import com.example.muraqib.data.repository.AppRestrictionsRepository
+import com.example.muraqib.data.repository.SecurityRepository
 import com.example.muraqib.ui.block.BlockActivity
 import java.util.Calendar
+import java.util.Locale
 
 /**
  * خدمة إمكانية الوصول لمراقبة النوافذ وحظر التطبيقات فورًا وبدقة 100% دون أي تأخير
@@ -34,6 +38,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
     private lateinit var restrictionsRepo: AppRestrictionsRepository
     private lateinit var appInfoManager: AppInfoManager
     private lateinit var usageStatsManager: UsageStatsManager
+    private lateinit var securityRepo: SecurityRepository
     private val handler = Handler(Looper.getMainLooper())
 
     private var lastBlockedPackage: String? = null
@@ -79,6 +84,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
         restrictionsRepo = AppRestrictionsRepository.getInstance(this)
         appInfoManager = AppInfoManager(this)
         usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        securityRepo = SecurityRepository(this)
 
         val info = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOWS_CHANGED
@@ -100,12 +106,28 @@ class MuraqibAccessibilityService : AccessibilityService() {
 
         val pkgName = event.packageName?.toString() ?: return
 
-        // 1. استبعاد تطبيقنا وشاشات النظام ولوحات المفاتيح فوراً قبل فحص إغلاق النافذة
+        // 1. فحص محاولات تعطيل التطبيق أو إلغاء تثبيته أو مسح بياناته أو إيقافه إجبارياً
+        if (isAttemptingToTamperWithMuraqib(pkgName)) {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            val intent = BlockActivity.createIntent(
+                context = this,
+                packageName = packageName,
+                appName = getString(R.string.app_name),
+                reason = "إعدادات التطبيق محمية ضد الإيقاف الإجباري ومسح البيانات وإلغاء التثبيت.",
+                nextAvailable = "أدخل رمز مرور التطبيق للمتابعة",
+                consumedMinutes = 0,
+                allowedMinutes = 0
+            )
+            startActivity(intent)
+            return
+        }
+
+        // 2. استبعاد تطبيقنا وشاشات النظام ولوحات المفاتيح فوراً قبل فحص إغلاق النافذة
         if (isIgnoredSystemPackage(pkgName)) {
             return
         }
 
-        // 2. إذا كان هناك نافذة حظر معروضة لتطبيق معين، ولكن المستخدم غادر هذا التطبيق وانتقل لتطبيق آخر مختلف
+        // 3. إذا كان هناك نافذة حظر معروضة لتطبيق معين، ولكن المستخدم غادر هذا التطبيق وانتقل لتطبيق آخر مختلف
         if (BlockOverlayManager.isShowing &&
             BlockOverlayManager.currentShowingPackage != null &&
             !isSameAppOrSubComponent(BlockOverlayManager.currentShowingPackage!!, pkgName)
@@ -114,6 +136,89 @@ class MuraqibAccessibilityService : AccessibilityService() {
         }
 
         checkAndBlockIfNeeded(pkgName)
+    }
+
+    /**
+     * فحص ما إذا كان المستخدم يحاول الدخول لصفحة إعدادات مراقب الاستخدام
+     * لإيقافه إجبارياً أو مسح بياناته أو إلغاء تثبيته عبر مثبت الحزم أو تعطيل إمكانية الوصول
+     */
+    private fun isAttemptingToTamperWithMuraqib(pkgName: String): Boolean {
+        if (!::securityRepo.isInitialized) {
+            securityRepo = SecurityRepository(this)
+        }
+        if (!securityRepo.isPinConfigured()) {
+            return false
+        }
+
+        val isInstaller = pkgName == "com.android.packageinstaller" ||
+                pkgName == "com.google.android.packageinstaller" ||
+                pkgName.contains("packageinstaller")
+
+        val isSettings = pkgName == "com.android.settings" ||
+                pkgName.startsWith("com.android.settings.")
+
+        if (!isInstaller && !isSettings) return false
+
+        if (isInstaller && !securityRepo.isAntiUninstallEnabled()) return false
+        if (isSettings && !securityRepo.isAntiTamperEnabled()) return false
+
+        val rootNode = rootInActiveWindow ?: return false
+        return try {
+            val textList = mutableListOf<String>()
+            collectNodeTexts(rootNode, textList)
+            val combinedText = textList.joinToString(" ").lowercase(Locale.getDefault())
+
+            val ourPkg = packageName.lowercase(Locale.getDefault())
+            val ourAppName = getString(R.string.app_name).lowercase(Locale.getDefault())
+
+            val mentionsMuraqib = combinedText.contains(ourPkg) || combinedText.contains(ourAppName) || combinedText.contains("muraqib")
+            if (!mentionsMuraqib) return false
+
+            if (isInstaller) {
+                // في مثبت الحزم، مجرد ذكر تطبيق مراقب يعني محاولة حذفه
+                return true
+            }
+
+            // في تطبيق الإعدادات، نتحقق من وجود إشارات التحكم بالتطبيق لمنع الإيقاف أو مسح البيانات أو إلغاء التثبيت أو تعطيل إمكانية الوصول
+            val hasTamperKeyword = combinedText.contains("إيقاف إجباري") ||
+                    combinedText.contains("force stop") ||
+                    combinedText.contains("إلغاء التثبيت") ||
+                    combinedText.contains("uninstall") ||
+                    combinedText.contains("مسح البيانات") ||
+                    combinedText.contains("clear data") ||
+                    combinedText.contains("مسح التخزين") ||
+                    combinedText.contains("clear storage") ||
+                    combinedText.contains("مكان التخزين") ||
+                    combinedText.contains("storage") ||
+                    combinedText.contains("إلغاء التفعيل") ||
+                    combinedText.contains("deactivate") ||
+                    combinedText.contains("استخدام الخدمة") ||
+                    combinedText.contains("use service") ||
+                    combinedText.contains("إمكانية الوصول") ||
+                    combinedText.contains("accessibility") ||
+                    combinedText.contains("تعطيل") ||
+                    combinedText.contains("disable")
+
+            hasTamperKeyword
+        } catch (e: Exception) {
+            false
+        } finally {
+            rootNode.recycle()
+        }
+    }
+
+    private fun collectNodeTexts(node: AccessibilityNodeInfo?, list: MutableList<String>) {
+        if (node == null) return
+        node.text?.toString()?.takeIf { it.isNotBlank() }?.let { list.add(it) }
+        node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { list.add(it) }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                collectNodeTexts(child, list)
+                child.recycle()
+            }
+        }
     }
 
     private fun isIgnoredSystemPackage(pkg: String): Boolean {

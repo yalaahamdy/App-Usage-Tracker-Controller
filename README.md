@@ -47,11 +47,18 @@ An enterprise-grade, offline-first Android application designed to boost digital
 - **شاشة حظر احتياطية (`BlockActivity`):** طبقة أمان ثانية تعمل عبر خدمة الفحص الدوري (`AppBlockerService`) لضمان عدم تجاوز القيود تحت أي ظرف.
 - **استعادة الحالة التلقائية (Boot Persistence):** إعادة تفعيل جميع القيود واستئناف خدمات الحظر تلقائياً بمجرد إعادة تشغيل الهاتف عبر `BootReceiver`.
 
+### 6. الحماية المتقدمة ومنع تعطيل التطبيق (Advanced Anti-Tamper & Device Admin)
+- **درع مسؤول الجهاز (Device Administrator):** يمنع حذف التطبيق أو إلغاء تثبيته نهائياً عبر سياسات حماية نظام أندرويد الرسمية.
+- **منع الإيقاف الإجباري ومسح البيانات (Anti-Tamper Interception):** يعترض فوراً أي محاولة لفتح صفحة التطبيق في إعدادات الهاتف لمنع النقر على "إيقاف إجباري" أو "مسح التخزين ومسح البيانات" أو تعطيل إمكانية الوصول بدون إدخال رمز المرور الرئيسي.
+- **الاعتراض الذكي لبرامج إلغاء التثبيت (Smart Anti-Uninstall):** رصد أي محاولة لفتح برامج إلغاء التثبيت (`PackageInstaller`) لحذف مراقب واعتراضها فوراً.
+- **حماية الإعدادات الأمنية برمز PIN:** اشتراط تأكيد رمز المرور (PIN) قبل السماح بتعطيل أي درع حماية أو إلغاء صلاحية مسؤول الجهاز.
+
 ---
 
 ## الأمان والخصوصية (Privacy & Security)
 
 - **بدون إذن إنترنت (Zero Internet Permission):** التطبيق لا يطلب ولا يحتوي على إذن الوصول للإنترنت (`android.permission.INTERNET`). كافة البيانات والتحليلات تتم وتُحفظ محلياً 100% على جهازك.
+- **منع التعطيل والحذف:** حماية متعددة الطبقات تدمج مسؤول الجهاز والاعتراض الفوري لشاشات الضبط ومثبت الحزم.
 - **تشفير رمز المرور وسؤال الأمان:** تشفير محلي يعتمد على خوارزمية SHA-256 مع تمليح عشوائي (Salted SHA-256)، ولا يتم حفظ الرمز الحقيقي في أي مكان.
 - **حماية من التخمين (Brute-Force Protection):** إغلاق مؤقت تصاعدي بعد تكرار إدخال رمز المرور بشكل خاطئ.
 - **حماية التعديل والحذف:** لا يمكن تغيير القيود أو تعديلها أو حذفها دون إدخال رمز المرور السري.
@@ -67,11 +74,13 @@ com.example.muraqib/
 ├── data/
 │   ├── models/            # Data entities & restriction models
 │   └── repository/        # UsageStats, NetworkStats, Security & Restrictions repositories
-├── service/
-│   ├── MuraqibAccessibilityService.kt   # Real-time foreground app detection
-│   ├── AppBlockerService.kt            # Periodic background blocker service
-│   ├── BlockOverlayManager.kt          # Fullscreen blocking overlay window
+├── receiver/
+│   ├── MuraqibDeviceAdminReceiver.kt   # Device Admin protection against uninstall
 │   └── BootReceiver.kt                 # Device reboot persistence handler
+├── service/
+│   ├── MuraqibAccessibilityService.kt   # Real-time app detection & anti-tamper shield
+│   ├── AppBlockerService.kt            # Periodic background blocker service
+│   └── BlockOverlayManager.kt          # Fullscreen blocking overlay window
 ├── ui/
 │   ├── dashboard/         # Usage overview, hourly charts & period filters
 │   ├── network/           # Mobile & Wi-Fi data consumption tracker
