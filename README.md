@@ -1,7 +1,6 @@
 # Muraqib: App Usage Tracker & Controller
 ### مراقب الاستخدام والتحكم في التطبيقات
 
-[![Android CI](https://github.com/yalaahamdy/App-Usage-Tracker-Controller/actions/workflows/android.yml/badge.svg)](https://github.com/yalaahamdy/App-Usage-Tracker-Controller/actions/workflows/android.yml)
 [![Release](https://img.shields.io/github/v/release/yalaahamdy/App-Usage-Tracker-Controller?color=blue&label=Release)](https://github.com/yalaahamdy/App-Usage-Tracker-Controller/releases)
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84.svg?style=flat&logo=android&logoColor=white)](https://www.android.com/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2-7F52FF.svg?style=flat&logo=kotlin&logoColor=white)](https://kotlinlang.org)
@@ -11,9 +10,9 @@
 [![Target SDK](https://img.shields.io/badge/Target%20SDK-34%20(Android%2014)-informational.svg)](https://developer.android.com)
 [![Offline First](https://img.shields.io/badge/Privacy-100%25%20Offline-success.svg)](#privacy--security)
 
-تطبيق أندرويد مفتوح المصدر مصمم لمعالجة إدمان الهاتف وتعزيز الإنتاجية عبر تتبع دقيق لاستخدام التطبيقات ومراقبة استهلاك بيانات الإنترنت مع محرك قيود وجدولة متقدم وشاشة حظر فورية عائمة تعمل بنسبة 100% بدون إنترنت حفاظاً على الخصوصية التامة.
+تطبيق أندرويد متكامل مفتوح المصدر مصمم لمعالجة إدمان الهاتف وتعزيز الإنتاجية عبر تتبع فائق الدقة لاستخدام التطبيقات ومراقبة استهلاك بيانات الإنترنت (الواي فاي وبيانات الهاتف) مع محرك قيود وجدولة متقدم، دروع حماية ضد الإيقاف وإلغاء التثبيت، اعتراض النوافذ المصغرة (PiP) والشاشات المنقسمة، حماية ضد الالتفاف عبر الوضع الآمن (Safe Mode)، ومحرك نسخ احتياطي مشفر بالكامل يعمل بدون إنترنت بنسبة 100% حفاظاً على الخصوصية التامة.
 
-An enterprise-grade, offline-first Android application designed to boost digital wellbeing, monitor application usage and network data consumption, and enforce flexible restrictions with scheduling and foreground blocking overlays.
+An enterprise-grade, offline-first Android application designed to boost digital wellbeing, monitor application usage and network data consumption, and enforce flexible restrictions with scheduling, foreground blocking overlays, multi-window & PiP shields, safe mode boot audits, and encrypted backup/restore capabilities.
 
 ---
 
@@ -26,31 +25,42 @@ An enterprise-grade, offline-first Android application designed to boost digital
 - **فترات زمنية مرنة ومقارنة ذكية:** فلاتر جاهزة (اليوم، أمس، الأسبوع، الشهر، أو فترة مخصصة) مع إظهار الفروقات ومعدل التغير مقارنة بالفترة السابقة.
 
 ### 2. مراقبة استهلاك بيانات الإنترنت (Data Consumption Monitoring)
-- **فصل دقيق للشبكات:** مراقبة حجم البيانات المستهلكة عبر شبكات الهاتف المحمول (Mobile Data) وشبكات الواي فاي (Wi-Fi).
+- **فصل دقيق للشبكات:** مراقبة دقيقة لحجم البيانات المستهلكة عبر شبكات الهاتف المحمول (Mobile Data) وشبكات الواي فاي (Wi-Fi).
 - **تصنيف حركة البيانات:** إحصائيات منفصلة للرفع (Upload) والتحميل (Download) لكل تطبيق بالاعتماد على `NetworkStatsManager`.
-- **تحديد التطبيقات المستهلكة للباقة:** كشف فوري للتطبيقات التي تستهلك سعات الإنترنت في الخلفية والواجهة.
+- **كشف التطبيقات المستهلكة للباقة:** رصد فوري للتطبيقات التي تستهلك سعات الإنترنت في الخلفية والواجهة للمساعدة في ترشيد استهلاك الباقة.
 
 ### 3. محرك تقييد وجدولة التطبيقات الذكي (Restriction Engine)
 - **حد الاستخدام الزمني (Usage Limit):** تعيين حد أقصى للاستخدام اليومي أو الأسبوعي لكل تطبيق أو لمجموعة تطبيقات معاً، مع تجدد تلقائي للرصيد عند بداية كل دورة زمنية.
 - **جدول أوقات الاستخدام (Usage Schedules):** حظر التطبيق خارج الساعات المصرح بها، مع دعم فترات متعددة في نفس اليوم وتخصيص أيام الأسبوع (مثل عطلة نهاية الأسبوع أو أيام العمل).
-- **الحظر الكلي (Total Block):** إمكانية إيقاف تشغيل تطبيقات معينة بشكل كامل ومستمر.
+- **الحظر الكلي (Total Block):** إمكانية إيقاف تشغيل تطبيقات معينة بشكل كامل ومستمر بمجرد فتحها.
 - **دمج القيود:** القدرة على تفعيل حد زمني وجدول زمني معاً، حيث يتم حظر التطبيق إذا تحقق أي من الشرطين.
 
-### 4. نظام التخطي المؤقت المعزول والمحمي (Secure Temporary Bypass)
+### 4. نظام التخطي المؤقت المعزول والمحمي برمز PIN (Isolated Temporary Bypass)
 - **فترات مرنة:** إمكانية تخطي الحظر مؤقتاً لمرة واحدة لفترة تتراوح بين دقيقة واحدة وحتى 5 ساعات (300 دقيقة).
 - **حماية برمز المرور (PIN Protection):** اشتراط إدخال رمز المرور السري للتطبيق لتأكيد التخطي ومنع التلاعب، مع لوحة مفاتيح رقمية مدمجة وشاشة تحقق تفاعلية.
-- **عزل التخطي لتطبيقات المجموعات (Group Bypass Isolation):** عند وضع قيد على مجموعة تطبيقات، فإن تخطي تطبيق واحد لا يفتح بقية تطبيقات المجموعة بل يظل كل تطبيق معزولاً ومحكوماً بقوانينه بدقة.
+- **عزل التخطي لتطبيقات المجموعات (Group Bypass Isolation):** عند وضع قيد على مجموعة تطبيقات، فإن تخطي تطبيق واحد لا يفتح بقية تطبيقات المجموعة، بل يظل كل تطبيق معزولاً ومحكوماً بقوانينه بدقة متناهية.
 - **إعادة الحظر التلقائي:** فور انتهاء الدقائق المحددة للتخطي، يتم إعادة تفعيل الحظر على التطبيق فورياً دون الحاجة لتدخل المستخدم.
 
-### 5. شاشة الحظر العائمة الفائقة (Full-Screen Blocking Overlay)
-- **تغطية فورية ومانعة:** نافذة عائمة بنظام `WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY` ترصد فتح التطبيق المحظور عبر خدمة إمكانية الوصول (`MuraqibAccessibilityService`) وتغطيه بالكامل وتمنع التفاعل معه.
-- **شاشة حظر احتياطية (`BlockActivity`):** طبقة أمان ثانية تعمل عبر خدمة الفحص الدوري (`AppBlockerService`) لضمان عدم تجاوز القيود تحت أي ظرف.
-- **استعادة الحالة التلقائية (Boot Persistence):** إعادة تفعيل جميع القيود واستئناف خدمات الحظر تلقائياً بمجرد إعادة تشغيل الهاتف عبر `BootReceiver`.
+### 5. حماية النوافذ المصغرة والشاشات المنقسمة (Picture-in-Picture & Split-Screen Shield)
+- **اعتراض وضع صورة داخل صورة (PiP Interception):** رصد فوري لأي محاولة لتشغيل مقاطع الفيديو أو الصوت في نافذة مصغرة عائمة للتطبيقات المحظورة، وإغلاق النافذة فوراً عبر استدعاء النظام مع فرض شاشة الحظر الكاملة لحجب المحتوى ومنع الاستماع في الخلفية.
+- **عزل أبعاد الشاشات المنقسمة (Split-Screen Window Bounds Isolation):** في وضع الشاشات المتعددة، يتم التعرف بدقة على النصف التابع للتطبيق المقيد وتغطيته بنافذة حظر عائمة مطابقة لإحداثياته، مع استمرار عمل التطبيق المسموح به في النصف الآخر بكل سلاسة دون أي تعارض.
+- **ثبات درع الحظر:** منع اختفاء شاشة الحظر عند التفاعل مع التطبيق المسموح في النصف الآخر طالما بقي التطبيق المحظور ظاهراً.
 
-### 6. الحماية المتقدمة ومنع تعطيل التطبيق (Advanced Anti-Tamper & Device Admin)
+### 6. رصد ومكافحة الإقلاع في الوضع الآمن (Android Safe Mode Protection & Boot Audit)
+- **كشف بيئة الوضع الآمن:** فحص مباشر لحالة الوضع الآمن للنظام لمنع التحايل على الحظر عبر إيقاف تطبيقات الطرف الثالث.
+- **محرك النبضات الأمنية وتدقيق الإقلاع (Heartbeat Engine & Boot Audit):** تسجيل نبضات نشاط دورية مستمرة، وعند كل عملية إقلاع للنظام يقوم المحرك بمقارنة الطابع الزمني وتدقيق سجلات الأحداث خلال فترة التوقف؛ لاكتشاف ما إذا تم تشغيل أي تطبيقات مقيدة أثناء توقف الحماية أو أثناء الإقلاع في الوضع الآمن.
+- **القفل الفوري التلقائي:** عند رصد أي تجاوزات أثناء توقف الحماية، يتم إلغاء فتح الجلسة فوراً وإجبار المستخدم على إدخال رمز المرور الرئيسي، مع تسجيل تفاصيل المخالفة وإشعار المسؤول.
+
+### 7. محرك النسخ الاحتياطي ونقل البيانات (Backup & Restore Engine)
+- **تصدير كامل للبيانات والإعدادات:** توليد ملفات JSON مهيكلة تتضمن كافة القيود والمجموعات وإعدادات الأمان مع بصمة تحقق رقمية مشفرة بتجزئة SHA-256 لمنع التلاعب.
+- **التوافق مع أحدث أنظمة أندرويد (Storage Access Framework):** حفظ النسخة الاحتياطية في أي مجلد أو سحابة يختارها المستخدم دون الحاجة لأذونات تخزين واسعة.
+- **مشاركة آمنة عبر FileProvider:** إمكانية إرسال النسخة الاحتياطية مباشرة عبر تطبيقات المراسلة والتخزين السحابي.
+- **أنماط استيراد متطورة:** دعم وضعين للاستيراد: وضع الدمج (Merge) للحفاظ على القيود السابقة وإضافة الجديد، ووضع الاستبدال الكامل (Replace All) لمسح القديم وتطبيق محتويات النسخة، مع اشتراط رمز المرور قبل الاستيراد.
+
+### 8. الحماية المتقدمة ومنع تعطيل التطبيق (Advanced Anti-Tamper & Device Admin)
 - **درع مسؤول الجهاز (Device Administrator):** يمنع حذف التطبيق أو إلغاء تثبيته نهائياً عبر سياسات حماية نظام أندرويد الرسمية.
 - **منع الإيقاف الإجباري ومسح البيانات (Anti-Tamper Interception):** يعترض فوراً أي محاولة لفتح صفحة التطبيق في إعدادات الهاتف لمنع النقر على "إيقاف إجباري" أو "مسح التخزين ومسح البيانات" أو تعطيل إمكانية الوصول بدون إدخال رمز المرور الرئيسي.
-- **الاعتراض الذكي لبرامج إلغاء التثبيت (Smart Anti-Uninstall):** رصد أي محاولة لفتح برامج إلغاء التثبيت (`PackageInstaller`) لحذف مراقب واعتراضها فوراً.
+- **الاعتراض الذكي لبرامج إلغاء التثبيت (Smart Anti-Uninstall):** رصد أي محاولة لفتح مثبت الحزم (`PackageInstaller`) لحذف مراقب واعتراضها فوراً.
 - **حماية الإعدادات الأمنية برمز PIN:** اشتراط تأكيد رمز المرور (PIN) قبل السماح بتعطيل أي درع حماية أو إلغاء صلاحية مسؤول الجهاز.
 
 ---
@@ -72,20 +82,23 @@ An enterprise-grade, offline-first Android application designed to boost digital
 ```text
 com.example.muraqib/
 ├── data/
-│   ├── models/            # Data entities & restriction models
-│   └── repository/        # UsageStats, NetworkStats, Security & Restrictions repositories
+│   ├── model/             # Data entities, restriction models & time windows
+│   └── repository/        # UsageStats, DataUsage, Security, Backup & Restrictions repositories
 ├── receiver/
 │   ├── MuraqibDeviceAdminReceiver.kt   # Device Admin protection against uninstall
-│   └── BootReceiver.kt                 # Device reboot persistence handler
+│   └── BootReceiver.kt                 # Boot audit & Safe Mode detection trigger
+├── security/
+│   └── SafeModeManager.kt              # Safe Mode detection, audit & heartbeat tracking
 ├── service/
-│   ├── MuraqibAccessibilityService.kt   # Real-time app detection & anti-tamper shield
-│   ├── AppBlockerService.kt            # Periodic background blocker service
-│   └── BlockOverlayManager.kt          # Fullscreen blocking overlay window
+│   ├── MuraqibAccessibilityService.kt  # Real-time app detection, PiP & split-screen shields
+│   ├── AppBlockerService.kt            # Periodic background blocker service & heartbeat
+│   └── BlockOverlayManager.kt          # Fullscreen & split-screen blocking overlay window
 ├── ui/
 │   ├── dashboard/         # Usage overview, hourly charts & period filters
-│   ├── network/           # Mobile & Wi-Fi data consumption tracker
+│   ├── data/              # Mobile & Wi-Fi data consumption tracker
 │   ├── restrictions/      # App restriction manager, cards & add/edit dialogs
 │   ├── security/          # PIN creation, verification & lock screens
+│   ├── settings/          # Security settings, device admin & backup/restore UI
 │   ├── theme/             # Material 3 colors, typography & RTL shapes
 │   └── Navigation.kt      # Jetpack Compose Navigation graph
 └── MainActivity.kt        # App entry point with PIN verification lifecycle
@@ -107,8 +120,8 @@ com.example.muraqib/
 ### الأذونات المطلوبة وسببها
 1. **الوصول لبيانات الاستخدام (`PACKAGE_USAGE_STATS`):** لقراءة وقت الشاشة وعدد مرات تشغيل التطبيقات واستهلاك شبكة الإنترنت.
 2. **الظهور فوق التطبيقات الأخرى (`SYSTEM_ALERT_WINDOW`):** لعرض نافذة الحظر الفورية وتغطية التطبيقات المقيدة عند فتحها.
-3. **خدمة إمكانية الوصول (`BIND_ACCESSIBILITY_SERVICE`):** للرصد الفوري واللحظي للتطبيق النشط في الواجهة وتطبيق الحظر دون أي تأخير.
-4. **التشغيل عند بدء التشغيل (`RECEIVE_BOOT_COMPLETED`):** لإعادة تشغيل محرك الحظر والقيود تلقائياً فور إعادة تشغيل الجهاز.
+3. **خدمة إمكانية الوصول (`BIND_ACCESSIBILITY_SERVICE`):** للرصد الفوري واللحظي للتطبيق النشط في الواجهة واعتراض نوافذ PiP والشاشات المنقسمة وتطبيق الحظر دون أي تأخير.
+4. **التشغيل عند بدء التشغيل (`RECEIVE_BOOT_COMPLETED`):** لإعادة تشغيل محرك الحظر وتدقيق الإقلاع تلقائياً فور إعادة تشغيل الجهاز.
 
 ---
 
@@ -117,15 +130,16 @@ com.example.muraqib/
 ### تحميل حزمة التطبيق الجاهزة (Pre-built APK)
 يمكنك تحميل أحدث نسخة مستقرة ومبنية وجاهزة للتثبيت مباشرة من صفحة الإصدارات:
 - **[صفحة الإصدارات على GitHub (GitHub Releases)](https://github.com/yalaahamdy/App-Usage-Tracker-Controller/releases)**
-- اسم الملف: `muraqib-v1.0.0.apk`
+- الإصدار الحالي: `v1.1.0`
+- اسم الملف: `Muraqib-v1.1.0.apk`
 - التجزئة الرقمية للتحقق (SHA-256):
   ```text
-  85FF54CAF80C902B61798D4EA230D69ECD293D1AD9D7F2E76610B66B373694CD
+  93A1FC79161DFCB9F1D71654D849BD67226AEDDA71A3E50111785FE923B2B06E
   ```
 
 ### التثبيت عبر ADB
 ```bash
-adb install -r muraqib-v1.0.0.apk
+adb install -r Muraqib-v1.1.0.apk
 ```
 
 ---
@@ -142,11 +156,11 @@ cd App-Usage-Tracker-Controller
 # 2. تشغيل اختبارات الوحدة الآلية
 ./gradlew test
 
-# 3. بناء نسخة الـ Debug
-./gradlew assembleDebug
+# 3. بناء نسخة الإصدار الموقعة
+./gradlew assembleRelease
 
 # ملف الـ APK الناتج ستجده في المسار التالي:
-# app/build/outputs/apk/debug/app-debug.apk
+# app/build/outputs/apk/release/app-release.apk
 ```
 
 ---
