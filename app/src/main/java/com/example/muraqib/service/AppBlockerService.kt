@@ -19,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import com.example.muraqib.MainActivity
 import com.example.muraqib.data.model.AppRestriction
 import com.example.muraqib.data.model.LimitPeriod
+import com.example.muraqib.data.model.isSettingsPackage
 import com.example.muraqib.data.repository.AppInfoManager
 import com.example.muraqib.data.repository.AppRestrictionsRepository
 import com.example.muraqib.ui.block.BlockActivity
@@ -236,9 +237,41 @@ class AppBlockerService : Service() {
 
             val appName = appInfoManager.getAppName(topPackage)
             val canDrawOverlay = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
-            val isSettingsApp = topPackage == "com.android.settings" || topPackage.startsWith("com.android.settings.")
+            val isSettingsApp = isSettingsPackage(topPackage)
 
-            if (canDrawOverlay && !isSettingsApp) {
+            if (isSettingsApp) {
+                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_HOME)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                try {
+                    startActivity(homeIntent)
+                } catch (e: Exception) {}
+            }
+
+            val blockIntent = BlockActivity.createIntent(
+                context = this,
+                packageName = topPackage,
+                appName = appName,
+                reason = evaluation.detailedReasonText,
+                nextAvailable = evaluation.nextAvailableText,
+                consumedMinutes = evaluation.consumedMinutes,
+                allowedMinutes = evaluation.allowedMinutes
+            ).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
+            }
+
+            try {
+                startActivity(blockIntent)
+            } catch (e: Exception) {}
+
+            showFullScreenBlockNotification(blockIntent, appName, evaluation.detailedReasonText)
+
+            if (canDrawOverlay) {
                 // إظهار النافذة العائمة فوق التطبيق المحظور مباشرة
                 BlockOverlayManager.show(
                     context = this,
@@ -254,37 +287,6 @@ class AppBlockerService : Service() {
                         }
                     }
                 )
-            } else {
-                // الخطة البديلة: الخروج للشاشة الرئيسية وإطلاق شاشة التنبيه
-                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                    addCategory(Intent.CATEGORY_HOME)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                try {
-                    startActivity(homeIntent)
-                } catch (e: Exception) {}
-
-                val blockIntent = BlockActivity.createIntent(
-                    context = this,
-                    packageName = topPackage,
-                    appName = appName,
-                    reason = evaluation.detailedReasonText,
-                    nextAvailable = evaluation.nextAvailableText,
-                    consumedMinutes = evaluation.consumedMinutes,
-                    allowedMinutes = evaluation.allowedMinutes
-                ).apply {
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    )
-                }
-
-                try {
-                    startActivity(blockIntent)
-                } catch (e: Exception) {}
-
-                showFullScreenBlockNotification(blockIntent, appName, evaluation.detailedReasonText)
             }
         } else {
             if (lastBlockedPackage == topPackage) {

@@ -4,6 +4,7 @@ import com.example.muraqib.data.model.AppRestriction
 import com.example.muraqib.data.model.BlockReason
 import com.example.muraqib.data.model.LimitPeriod
 import com.example.muraqib.data.model.TimeWindow
+import com.example.muraqib.data.model.isSettingsPackage
 import com.example.muraqib.data.repository.AppRestrictionsRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -325,6 +326,47 @@ class RestrictionModelsTest {
         val evalYouTube = repo.evaluate(groupWithSettings, consumedMinutes = 0, targetPackage = "com.google.android.youtube")
         assertTrue(evalYouTube.isBlocked)
         assertEquals(BlockReason.TOTAL_BLOCK, evalYouTube.reason)
+    }
+
+    @Test
+    fun testSettingsPackageRecognitionAndBlockingAcrossOEMs() {
+        // التحقق من التعرف المباشر على حزم الإعدادات لمختلف الشركات المصنعة
+        assertTrue(isSettingsPackage("com.android.settings"))
+        assertTrue(isSettingsPackage("com.android.settings.SubSettings"))
+        assertTrue(isSettingsPackage("com.google.android.settings"))
+        assertTrue(isSettingsPackage("com.google.android.settings.intelligence"))
+        assertTrue(isSettingsPackage("com.samsung.android.settings"))
+        assertTrue(isSettingsPackage("com.coloros.settings"))
+        assertTrue(isSettingsPackage("com.coloros.settings.privacy"))
+        assertTrue(isSettingsPackage("com.oplus.settings"))
+        assertTrue(isSettingsPackage("com.vivo.settings"))
+        assertTrue(isSettingsPackage("com.miui.securitycenter"))
+        assertTrue(isSettingsPackage("com.huawei.settings"))
+        assertTrue(isSettingsPackage("com.motorola.android.settings"))
+
+        // التحقق من عدم التعرف على تطبيقات أخرى تشبه الإعدادات بالخطأ
+        assertFalse(isSettingsPackage("com.whatsapp"))
+        assertFalse(isSettingsPackage("com.google.android.youtube"))
+        assertFalse(isSettingsPackage(null))
+        assertFalse(isSettingsPackage(""))
+
+        // التحقق من أن قيد الحظر على الإعدادات يطابق تلقائياً كافة الواجهات والشركات
+        val settingsRestriction = AppRestriction(
+            packageName = "com.android.settings",
+            appName = "الضبط",
+            isEnabled = true,
+            isTotalBlock = true
+        )
+
+        assertTrue(settingsRestriction.appliesTo("com.android.settings"))
+        assertTrue(settingsRestriction.appliesTo("com.samsung.android.settings"))
+        assertTrue(settingsRestriction.appliesTo("com.coloros.settings"))
+        assertTrue(settingsRestriction.appliesTo("com.oplus.settings"))
+        assertTrue(settingsRestriction.appliesTo("com.vivo.settings"))
+        assertTrue(settingsRestriction.appliesTo("com.miui.securitycenter"))
+        assertTrue(settingsRestriction.appliesTo("com.google.android.settings.intelligence"))
+
+        assertFalse(settingsRestriction.appliesTo("com.instagram.android"))
     }
 
     /**

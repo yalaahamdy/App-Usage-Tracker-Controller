@@ -23,6 +23,7 @@ import androidx.core.app.NotificationCompat
 import com.example.muraqib.R
 import com.example.muraqib.data.model.AppRestriction
 import com.example.muraqib.data.model.LimitPeriod
+import com.example.muraqib.data.model.isSettingsPackage
 import com.example.muraqib.data.repository.AppInfoManager
 import com.example.muraqib.data.repository.AppRestrictionsRepository
 import com.example.muraqib.data.repository.SecurityRepository
@@ -118,7 +119,59 @@ class MuraqibAccessibilityService : AccessibilityService() {
         }
         securityRepo.recordHeartbeat()
 
-        // 2. فحص محاولات تعطيل التطبيق أو إلغاء تثبيته أو مسح بياناته أو إيقافه إجبارياً
+        // 2. فحص وتطبيق الحظر الفوري لتطبيق الضبط/الإعدادات فور فتحه دون أي تأخير
+        if (pkgName != null && isSettingsPackage(pkgName)) {
+            if (!::restrictionsRepo.isInitialized) restrictionsRepo = AppRestrictionsRepository.getInstance(this)
+            if (!::appInfoManager.isInitialized) appInfoManager = AppInfoManager(this)
+
+            val settingsRestriction = restrictionsRepo.getRestrictionForPackage(pkgName)
+            if (settingsRestriction != null && settingsRestriction.isEnabled && !restrictionsRepo.isPackageBypassed(pkgName)) {
+                val consumed = calculateConsumedMinutes(settingsRestriction)
+                val eval = restrictionsRepo.evaluateRestriction(settingsRestriction, consumed, Calendar.getInstance(), pkgName)
+                if (eval.isBlocked) {
+                    // إغلاق تطبيق الإعدادات فوراً والعودة للشاشة الرئيسية لمنع التفاعل معه نهائياً
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+
+                    val appName = appInfoManager.getAppName(pkgName)
+                    val blockIntent = BlockActivity.createIntent(
+                        context = this,
+                        packageName = pkgName,
+                        appName = appName,
+                        reason = eval.detailedReasonText,
+                        nextAvailable = eval.nextAvailableText,
+                        consumedMinutes = eval.consumedMinutes,
+                        allowedMinutes = eval.allowedMinutes
+                    ).apply {
+                        addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        )
+                    }
+                    try {
+                        startActivity(blockIntent)
+                    } catch (e: Exception) {}
+
+                    BlockOverlayManager.show(
+                        context = this,
+                        packageName = pkgName,
+                        appName = appName,
+                        reason = eval.detailedReasonText,
+                        nextAvailable = eval.nextAvailableText,
+                        onHomeAction = {
+                            performGlobalAction(GLOBAL_ACTION_HOME)
+                        },
+                        onBypassAction = { durationMinutes ->
+                            scheduleBypassExpiration(pkgName, durationMinutes)
+                        }
+                    )
+                    return
+                }
+            }
+        }
+
+        // 3. فحص محاولات تعطيل التطبيق أو إلغاء تثبيته أو مسح بياناته أو إيقافه إجبارياً
         if (pkgName != null && isAttemptingToTamperWithMuraqib(pkgName)) {
             performGlobalAction(GLOBAL_ACTION_HOME)
             val intent = BlockActivity.createIntent(
@@ -134,7 +187,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
             return
         }
 
-        // 3. فحص كافة النوافذ النشطة والتفاعلية لدعم الشاشات المنقسمة (Split-Screen) ووضع صورة داخل صورة (PiP)
+        // 4. فحص كافة النوافذ النشطة والتفاعلية لدعم الشاشات المنقسمة (Split-Screen) ووضع صورة داخل صورة (PiP)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             try {
                 if (!::restrictionsRepo.isInitialized) restrictionsRepo = AppRestrictionsRepository.getInstance(this)
@@ -145,7 +198,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
 
                 for (w in windowList) {
                     val isPip = isWindowInPip(w)
-                    val isApp = w.type == AccessibilityWindowInfo.TYPE_APPLICATION
+                    val isApp = w.type == AccessibilityWindowInfo.TYPE_APPLICATION || w.type == AccessibilityWindowInfo.TYPE_SYSTEM
 
                     if (isPip || isApp) {
                         val nodePkg = w.root?.packageName?.toString() ?: continue
@@ -157,12 +210,35 @@ class MuraqibAccessibilityService : AccessibilityService() {
                             val eval = restrictionsRepo.evaluateRestriction(restriction, consumed, Calendar.getInstance(), nodePkg)
                             if (eval.isBlocked) {
                                 foundBlockedInWindows = true
-                                if (isPip) {
+                                if (isPip || isSettingsPackage(nodePkg)) {
                                     performGlobalAction(GLOBAL_ACTION_HOME)
+                                    performGlobalAction(GLOBAL_ACTION_BACK)
                                 }
                                 val rect = Rect()
                                 w.getBoundsInScreen(rect)
                                 val appName = appInfoManager.getAppName(nodePkg)
+
+                                if (isSettingsPackage(nodePkg)) {
+                                    val blockIntent = BlockActivity.createIntent(
+                                        context = this,
+                                        packageName = nodePkg,
+                                        appName = appName,
+                                        reason = eval.detailedReasonText,
+                                        nextAvailable = eval.nextAvailableText,
+                                        consumedMinutes = eval.consumedMinutes,
+                                        allowedMinutes = eval.allowedMinutes
+                                    ).apply {
+                                        addFlags(
+                                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                        )
+                                    }
+                                    try {
+                                        startActivity(blockIntent)
+                                    } catch (e: Exception) {}
+                                }
+
                                 BlockOverlayManager.show(
                                     context = this,
                                     packageName = nodePkg,
@@ -172,7 +248,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
                                     windowBounds = if (!isPip && rect.width() > 0 && rect.height() > 0) rect else null,
                                     isPipMode = isPip,
                                     onHomeAction = {
-                                        if (isPip) performGlobalAction(GLOBAL_ACTION_HOME) else performGlobalAction(GLOBAL_ACTION_BACK)
+                                        if (isPip || isSettingsPackage(nodePkg)) performGlobalAction(GLOBAL_ACTION_HOME) else performGlobalAction(GLOBAL_ACTION_BACK)
                                     },
                                     onBypassAction = { durationMinutes ->
                                         scheduleBypassExpiration(nodePkg, durationMinutes)
@@ -191,7 +267,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
                         val p = w.root?.packageName?.toString()
                         p != null && (p == showingPkg || isSameAppOrSubComponent(showingPkg, p))
                     }
-                    if (!isStillVisibleInAnyWindow && !foundBlockedInWindows) {
+                    if (!isStillVisibleInAnyWindow && !foundBlockedInWindows && !isSettingsPackage(showingPkg)) {
                         BlockOverlayManager.dismiss()
                     }
                 }
@@ -300,16 +376,8 @@ class MuraqibAccessibilityService : AccessibilityService() {
 
     private fun isSameAppOrSubComponent(currentPkg: String, newPkg: String): Boolean {
         if (currentPkg == newPkg) return true
-        if (currentPkg == "com.android.settings" || currentPkg.startsWith("com.android.settings.")) {
-            if (newPkg == "com.android.settings" ||
-                newPkg.startsWith("com.android.settings.") ||
-                newPkg.startsWith("com.google.android.settings.") ||
-                newPkg.startsWith("com.samsung.android.settings") ||
-                newPkg == "com.google.android.settings.intelligence" ||
-                newPkg == "com.android.settings.intelligence"
-            ) {
-                return true
-            }
+        if (isSettingsPackage(currentPkg) && isSettingsPackage(newPkg)) {
+            return true
         }
         return false
     }
@@ -353,8 +421,15 @@ class MuraqibAccessibilityService : AccessibilityService() {
 
         if (evaluation.isBlocked) {
             val now = System.currentTimeMillis()
-            // منع إعادة تشغيل شاشة الحظر لنفس التطبيق إذا فتحت قبل أقل من 1.5 ثانية
-            if (lastBlockedPackage == targetPackage && (now - lastBlockTimestamp) < 1500L && BlockOverlayManager.isShowing) {
+            val isSettings = isSettingsPackage(targetPackage)
+
+            if (isSettings) {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+
+            // منع إعادة تشغيل شاشة الحظر لنفس التطبيق إذا فتحت قبل أقل من 1.5 ثانية (باستثناء الإعدادات لضمان عدم إفلاتها)
+            if (lastBlockedPackage == targetPackage && (now - lastBlockTimestamp) < 1500L && BlockOverlayManager.isShowing && !isSettings) {
                 return
             }
 
@@ -367,6 +442,27 @@ class MuraqibAccessibilityService : AccessibilityService() {
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
             val windowBounds = if (isPip) null else getAppWindowBounds(targetPackage)
+
+            if (isSettings) {
+                val blockIntent = BlockActivity.createIntent(
+                    context = this,
+                    packageName = targetPackage,
+                    appName = appName,
+                    reason = evaluation.detailedReasonText,
+                    nextAvailable = evaluation.nextAvailableText,
+                    consumedMinutes = evaluation.consumedMinutes,
+                    allowedMinutes = evaluation.allowedMinutes
+                ).apply {
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    )
+                }
+                try {
+                    startActivity(blockIntent)
+                } catch (e: Exception) {}
+            }
 
             // إطلاق النافذة العائمة لتغطية التطبيق بالكامل بنظام TYPE_ACCESSIBILITY_OVERLAY
             BlockOverlayManager.show(

@@ -7,6 +7,7 @@ import com.example.muraqib.data.model.BlockReason
 import com.example.muraqib.data.model.LimitPeriod
 import com.example.muraqib.data.model.RestrictionEvaluation
 import com.example.muraqib.data.model.TimeWindow
+import com.example.muraqib.data.model.isSettingsPackage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -188,19 +189,43 @@ class AppRestrictionsRepository(context: Context) {
     fun getTemporaryBypassRemainingSeconds(packageName: String): Long {
         val expiry = prefs.getLong("$PREFIX_BYPASS_UNTIL$packageName", 0L)
         val diff = expiry - System.currentTimeMillis()
-        return if (diff > 0) (diff / 1000L) + 1 else 0L
+        if (diff > 0) return (diff / 1000L) + 1
+        if (isSettingsPackage(packageName)) {
+            val primarySettings = getAllRestrictions()
+                .flatMap { it.allPackages }
+                .firstOrNull { isSettingsPackage(it) }
+            if (primarySettings != null && primarySettings != packageName) {
+                val primaryExpiry = prefs.getLong("$PREFIX_BYPASS_UNTIL$primarySettings", 0L)
+                val primaryDiff = primaryExpiry - System.currentTimeMillis()
+                if (primaryDiff > 0) return (primaryDiff / 1000L) + 1
+            }
+        }
+        return 0L
     }
 
     /**
      * التحقق مما إذا كان هناك تخطٍ مؤقت نشط للتطبيق حاليًا
      */
     fun isPackageBypassed(packageName: String): Boolean {
-        val remaining = getTemporaryBypassRemainingSeconds(packageName)
+        if (checkBypassInternal(packageName)) return true
+        if (isSettingsPackage(packageName)) {
+            val primarySettings = getAllRestrictions()
+                .flatMap { it.allPackages }
+                .firstOrNull { isSettingsPackage(it) }
+            if (primarySettings != null && primarySettings != packageName) {
+                if (checkBypassInternal(primarySettings)) return true
+            }
+        }
+        return false
+    }
+
+    private fun checkBypassInternal(pkg: String): Boolean {
+        val remaining = getTemporaryBypassRemainingSeconds(pkg)
         if (remaining <= 0L) {
-            if (prefs.contains("$PREFIX_BYPASS_UNTIL$packageName")) {
+            if (prefs.contains("$PREFIX_BYPASS_UNTIL$pkg")) {
                 prefs.edit()
-                    .remove("$PREFIX_BYPASS_UNTIL$packageName")
-                    .remove("$PREFIX_BYPASS_DURATION$packageName")
+                    .remove("$PREFIX_BYPASS_UNTIL$pkg")
+                    .remove("$PREFIX_BYPASS_DURATION$pkg")
                     .apply()
             }
             return false
@@ -216,6 +241,17 @@ class AppRestrictionsRepository(context: Context) {
             .remove("$PREFIX_BYPASS_UNTIL$packageName")
             .remove("$PREFIX_BYPASS_DURATION$packageName")
             .apply()
+        if (isSettingsPackage(packageName)) {
+            val primarySettings = getAllRestrictions()
+                .flatMap { it.allPackages }
+                .firstOrNull { isSettingsPackage(it) }
+            if (primarySettings != null && primarySettings != packageName) {
+                prefs.edit()
+                    .remove("$PREFIX_BYPASS_UNTIL$primarySettings")
+                    .remove("$PREFIX_BYPASS_DURATION$primarySettings")
+                    .apply()
+            }
+        }
         loadRestrictions()
     }
 
@@ -247,14 +283,8 @@ class AppRestrictionsRepository(context: Context) {
             targetPackage != null -> {
                 if (restriction.allPackages.contains(targetPackage)) {
                     targetPackage
-                } else if (restriction.allPackages.contains("com.android.settings") &&
-                    (targetPackage.startsWith("com.android.settings.") ||
-                     targetPackage.startsWith("com.google.android.settings.") ||
-                     targetPackage.startsWith("com.samsung.android.settings") ||
-                     targetPackage == "com.google.android.settings.intelligence" ||
-                     targetPackage == "com.android.settings.intelligence")
-                ) {
-                    "com.android.settings"
+                } else if (isSettingsPackage(targetPackage)) {
+                    restriction.allPackages.firstOrNull { isSettingsPackage(it) } ?: targetPackage
                 } else {
                     targetPackage
                 }

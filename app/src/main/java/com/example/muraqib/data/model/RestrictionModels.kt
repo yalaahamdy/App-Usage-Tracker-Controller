@@ -105,16 +105,10 @@ data class AppRestriction(
      */
     fun appliesTo(pkg: String): Boolean {
         if (allPackages.contains(pkg)) return true
-        // إذا كان قيد الحظر يشمل تطبيق الضبط، نطبق الحظر على جميع الشاشات والخدمات والأنشطة التابعة للضبط
-        if (allPackages.contains("com.android.settings")) {
-            if (pkg == "com.google.android.settings.intelligence" ||
-                pkg == "com.android.settings.intelligence" ||
-                pkg.startsWith("com.android.settings.") ||
-                pkg.startsWith("com.google.android.settings.") ||
-                pkg.startsWith("com.samsung.android.settings")
-            ) {
-                return true
-            }
+        // إذا كان قيد الحظر يشمل تطبيق الضبط، نطبق الحظر على جميع الشاشات والخدمات والأنشطة التابعة للضبط مهما اختلفت واجهة الجهاز
+        val hasSettings = allPackages.any { isSettingsPackage(it) }
+        if (hasSettings && isSettingsPackage(pkg)) {
+            return true
         }
         return false
     }
@@ -271,3 +265,25 @@ data class RestrictionEvaluation(
             BlockReason.NONE -> "التطبيق متاح للاستخدام."
         }
 }
+
+/**
+ * التحقق مما إذا كانت الحزمة تنتمي لتطبيق الضبط/الإعدادات بكافة إصداراته وواجهات الشركات المصنعة
+ */
+fun isSettingsPackage(pkg: String?): Boolean {
+    if (pkg.isNullOrBlank()) return false
+    val lower = pkg.lowercase(Locale.getDefault())
+    return lower == "com.android.settings" ||
+            lower.startsWith("com.android.settings.") ||
+            lower.startsWith("com.google.android.settings") ||
+            lower.startsWith("com.samsung.android.settings") ||
+            lower == "com.coloros.settings" ||
+            lower.startsWith("com.coloros.settings.") ||
+            lower == "com.oplus.settings" ||
+            lower.startsWith("com.oplus.settings.") ||
+            lower == "com.vivo.settings" ||
+            lower.startsWith("com.vivo.settings.") ||
+            lower == "com.miui.securitycenter" ||
+            lower.endsWith(".settings") ||
+            lower.contains(".settings.")
+}
+

@@ -70,6 +70,11 @@ An enterprise-grade, offline-first Android application designed to boost digital
 - **استثناء تحسين البطارية وبدء التشغيل التلقائي (Battery Exemption & OEM Autostart):** دعم مدمج لطلب استثناء التطبيق من تحسينات البطارية (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)، مع توجيه ذكي لإعدادات البدء التلقائي لأجهزة شاومي وسامسونج وهواوي وأوبو وفيفو.
 - **كشف التلاعب بالساعة (Clock Rollback Detection):** رصد ومكافحة أي محاولات لتأخير أو تقديم ساعة الجهاز يدوياً بعد إعادة التشغيل للالتفاف على الحدود الزمنية أو الجداول المجدولة.
 
+### 10. الحظر القاطع وتأمين شاشات الإعدادات والضبط (Hardened Settings Lockdown)
+- **معالجة حظر النوافذ العائمة للنظام (Bypassing Overlay-Hiding Restrictions):** يفرض نظام أندرويد حظر ظهور النوافذ العائمة فوق تطبيق الإعدادات لمنع هجمات حجب النقر (Tapjacking). يتغلب مراقب على ذلك عبر عدم الاكتفاء بالنافذة العائمة، بل إجبار النظام على الخروج الفوري للشاشة الرئيسية (`performGlobalAction(GLOBAL_ACTION_HOME)`) وإطلاق شاشة الحظر الكاملة كنشاط مستقل (`BlockActivity`) يطرد المستخدم فوراً قبل أن يتمكن من لمس أي إعداد.
+- **التعرف الشامل على كافة واجهات الشركات المصنعة (Universal OEM Settings Recognition):** دعم حزم الإعدادات المخصصة لكافة الشركات مثل سامسونج (`com.samsung.android.settings`)، وشاومي (`com.miui.securitycenter`)، وأوبو وريلمي وون بلس (`com.coloros.settings`, `com.oplus.settings`)، وفيفو (`com.vivo.settings`)، وهواوي وجوجل بكسل، والشاشات الفرعية مثل إعدادات الشبكة والتطبيقات والأمان.
+- **تطبيق فوري في أجزاء من الثانية:** دمج الرصد المزدوج عبر فحص النوافذ المتزامنة وأحداث إمكانية الوصول، لضمان استحالة النفاذ للإعدادات حتى في وضع الشاشات المنقسمة أو النوافذ العائمة.
+
 ---
 
 ## الأمان والخصوصية (Privacy & Security)
@@ -138,16 +143,16 @@ com.example.muraqib/
 ### تحميل حزمة التطبيق الجاهزة (Pre-built APK)
 يمكنك تحميل أحدث نسخة مستقرة ومبنية وجاهزة للتثبيت مباشرة من صفحة الإصدارات:
 - **[صفحة الإصدارات على GitHub (GitHub Releases)](https://github.com/yalaahamdy/App-Usage-Tracker-Controller/releases)**
-- الإصدار الحالي: `v1.1.1`
-- اسم الملف: `Muraqib-v1.1.1.apk`
+- الإصدار الحالي: `v1.1.2`
+- اسم الملف: `Muraqib-v1.1.2.apk`
 - التجزئة الرقمية للتحقق (SHA-256):
   ```text
-  A9894E238E459CA40924813B95E0873DD393203164AE57B32E1EEB219F3A8188
+  25ED3CC89AD1D5E0E6D7C9191DE9706B3519A3390F74DEDB59354B14E5005EE2
   ```
 
 ### التثبيت عبر ADB
 ```bash
-adb install -r Muraqib-v1.1.1.apk
+adb install -r Muraqib-v1.1.2.apk
 ```
 
 ---
