@@ -143,16 +143,16 @@ com.example.muraqib/
 ### تحميل حزمة التطبيق الجاهزة (Pre-built APK)
 يمكنك تحميل أحدث نسخة مستقرة ومبنية وجاهزة للتثبيت مباشرة من صفحة الإصدارات:
 - **[صفحة الإصدارات على GitHub (GitHub Releases)](https://github.com/yalaahamdy/App-Usage-Tracker-Controller/releases)**
-- الإصدار الحالي: `v1.1.2`
-- اسم الملف: `Muraqib-v1.1.2.apk`
+- الإصدار الحالي: `v1.1.3`
+- اسم الملف: `Muraqib-v1.1.3.apk`
 - التجزئة الرقمية للتحقق (SHA-256):
   ```text
-  25ED3CC89AD1D5E0E6D7C9191DE9706B3519A3390F74DEDB59354B14E5005EE2
+  00703663B8C838DDE20D200A5B863190AD9BD504C0719112D3D483B75E51F99B
   ```
 
 ### التثبيت عبر ADB
 ```bash
-adb install -r Muraqib-v1.1.2.apk
+adb install -r Muraqib-v1.1.3.apk
 ```
 
 ---

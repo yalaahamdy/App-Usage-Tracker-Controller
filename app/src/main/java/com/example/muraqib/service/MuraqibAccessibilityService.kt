@@ -187,98 +187,51 @@ class MuraqibAccessibilityService : AccessibilityService() {
             return
         }
 
-        // 4. فحص كافة النوافذ النشطة والتفاعلية لدعم الشاشات المنقسمة (Split-Screen) ووضع صورة داخل صورة (PiP)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            try {
-                if (!::restrictionsRepo.isInitialized) restrictionsRepo = AppRestrictionsRepository.getInstance(this)
-                if (!::appInfoManager.isInitialized) appInfoManager = AppInfoManager(this)
-
-                val windowList = windows
-                var foundBlockedInWindows = false
-
-                for (w in windowList) {
-                    val isPip = isWindowInPip(w)
-                    val isApp = w.type == AccessibilityWindowInfo.TYPE_APPLICATION || w.type == AccessibilityWindowInfo.TYPE_SYSTEM
-
-                    if (isPip || isApp) {
-                        val nodePkg = w.root?.packageName?.toString() ?: continue
-                        if (isIgnoredSystemPackage(nodePkg)) continue
-
-                        val restriction = restrictionsRepo.getRestrictionForPackage(nodePkg)
-                        if (restriction != null && restriction.isEnabled && !restrictionsRepo.isPackageBypassed(nodePkg)) {
-                            val consumed = calculateConsumedMinutes(restriction)
-                            val eval = restrictionsRepo.evaluateRestriction(restriction, consumed, Calendar.getInstance(), nodePkg)
-                            if (eval.isBlocked) {
-                                foundBlockedInWindows = true
-                                if (isPip || isSettingsPackage(nodePkg)) {
+        // 4. في حالة حدث تغير النوافذ (TYPE_WINDOWS_CHANGED): فحص وضع صورة داخل صورة (PiP) فقط دون لمس إغلاق النوافذ
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                try {
+                    val windowList = windows ?: return
+                    for (w in windowList) {
+                        if (isWindowInPip(w)) {
+                            val nodePkg = w.root?.packageName?.toString() ?: continue
+                            if (isIgnoredSystemPackage(nodePkg)) continue
+                            if (!::restrictionsRepo.isInitialized) restrictionsRepo = AppRestrictionsRepository.getInstance(this)
+                            val restriction = restrictionsRepo.getRestrictionForPackage(nodePkg)
+                            if (restriction != null && restriction.isEnabled && !restrictionsRepo.isPackageBypassed(nodePkg)) {
+                                val consumed = calculateConsumedMinutes(restriction)
+                                val eval = restrictionsRepo.evaluateRestriction(restriction, consumed, Calendar.getInstance(), nodePkg)
+                                if (eval.isBlocked) {
                                     performGlobalAction(GLOBAL_ACTION_HOME)
-                                    performGlobalAction(GLOBAL_ACTION_BACK)
+                                    checkAndBlockIfNeeded(nodePkg)
+                                    break
                                 }
-                                val rect = Rect()
-                                w.getBoundsInScreen(rect)
-                                val appName = appInfoManager.getAppName(nodePkg)
-
-                                if (isSettingsPackage(nodePkg)) {
-                                    val blockIntent = BlockActivity.createIntent(
-                                        context = this,
-                                        packageName = nodePkg,
-                                        appName = appName,
-                                        reason = eval.detailedReasonText,
-                                        nextAvailable = eval.nextAvailableText,
-                                        consumedMinutes = eval.consumedMinutes,
-                                        allowedMinutes = eval.allowedMinutes
-                                    ).apply {
-                                        addFlags(
-                                            Intent.FLAG_ACTIVITY_NEW_TASK or
-                                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                                            Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                        )
-                                    }
-                                    try {
-                                        startActivity(blockIntent)
-                                    } catch (e: Exception) {}
-                                }
-
-                                BlockOverlayManager.show(
-                                    context = this,
-                                    packageName = nodePkg,
-                                    appName = appName,
-                                    reason = eval.detailedReasonText,
-                                    nextAvailable = eval.nextAvailableText,
-                                    windowBounds = if (!isPip && rect.width() > 0 && rect.height() > 0) rect else null,
-                                    isPipMode = isPip,
-                                    onHomeAction = {
-                                        if (isPip || isSettingsPackage(nodePkg)) performGlobalAction(GLOBAL_ACTION_HOME) else performGlobalAction(GLOBAL_ACTION_BACK)
-                                    },
-                                    onBypassAction = { durationMinutes ->
-                                        scheduleBypassExpiration(nodePkg, durationMinutes)
-                                    }
-                                )
-                                break
                             }
                         }
                     }
-                }
-
-                // إدارة إغلاق نافذة الحظر فقط إذا لم يعد التطبيق المحظور ظاهراً في أي من النوافذ النشطة
-                if (BlockOverlayManager.isShowing && BlockOverlayManager.currentShowingPackage != null) {
-                    val showingPkg = BlockOverlayManager.currentShowingPackage!!
-                    val isStillVisibleInAnyWindow = windowList.any { w ->
-                        val p = w.root?.packageName?.toString()
-                        p != null && (p == showingPkg || isSameAppOrSubComponent(showingPkg, p))
-                    }
-                    if (!isStillVisibleInAnyWindow && !foundBlockedInWindows && !isSettingsPackage(showingPkg)) {
-                        BlockOverlayManager.dismiss()
-                    }
-                }
-            } catch (e: Exception) {}
+                } catch (e: Exception) {}
+            }
+            return
         }
 
-        // 4. استبعاد تطبيقنا وشاشات النظام ولوحات المفاتيح
+        // 5. استبعاد الأحداث التي لا تحتوي على اسم حزمة أو تنتمي لشاشات النظام ولوحات المفاتيح
         if (pkgName == null || isIgnoredSystemPackage(pkgName)) {
             return
         }
 
+        // 6. إدارة إغلاق نافذة الحظر فقط عندما يغادر المستخدم التطبيق المحظور وينتقل لتطبيق آخر مسموح أو الشاشة الرئيسية
+        if (BlockOverlayManager.isShowing && BlockOverlayManager.currentShowingPackage != null) {
+            val showingPkg = BlockOverlayManager.currentShowingPackage!!
+            if (!isSameAppOrSubComponent(showingPkg, pkgName)) {
+                // التحقق مما إذا كان التطبيق المحظور لا يزال ظاهراً في شاشة منقسمة نشطة (Split-Screen)
+                val stillInSplit = isPackageVisibleInSplitScreen(showingPkg)
+                if (!stillInSplit) {
+                    BlockOverlayManager.dismiss()
+                }
+            }
+        }
+
+        // 7. تقييم وحظر التطبيق النشط الحالي فوراً إذا كان مقيداً
         checkAndBlockIfNeeded(pkgName)
     }
 
@@ -558,6 +511,41 @@ class MuraqibAccessibilityService : AccessibilityService() {
             } catch (e: Exception) {}
         }
         return false
+    }
+
+    /**
+     * التحقق مما إذا كان التطبيق المحدد لا يزال معروضاً في وضع الشاشات المنقسمة (Split-Screen)
+     */
+    private fun isPackageVisibleInSplitScreen(targetPackage: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false
+        return try {
+            val windowList = windows ?: return false
+            val metrics = resources.displayMetrics
+            val screenHeight = metrics.heightPixels
+            val screenWidth = metrics.widthPixels
+
+            var splitWindowCount = 0
+            var hasTargetOrNullRoot = false
+
+            for (w in windowList) {
+                if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION) {
+                    val rect = Rect()
+                    w.getBoundsInScreen(rect)
+                    if (rect.width() > 0 && rect.height() > 0 &&
+                        (rect.height() < (screenHeight * 0.88f) || rect.width() < (screenWidth * 0.88f))
+                    ) {
+                        splitWindowCount++
+                        val p = w.root?.packageName?.toString()
+                        if (p == null || p == targetPackage || isSameAppOrSubComponent(targetPackage, p)) {
+                            hasTargetOrNullRoot = true
+                        }
+                    }
+                }
+            }
+            splitWindowCount >= 2 && hasTargetOrNullRoot
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /**

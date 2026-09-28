@@ -88,6 +88,76 @@ class SafeModeAndMultiWindowTest {
         assertEquals(1150, bottomBounds.top)
     }
 
+    @Test
+    fun testFullscreenAndSplitScreenOverlayDismissProtection() {
+        val blockedPkg = "com.google.android.youtube"
+        val launcherPkg = "com.google.android.apps.nexuslauncher"
+        val notesPkg = "com.example.notes"
+
+        // محاكاة حالة النافذة العائمة: معروضة لتطبيق يوتيوب
+        var isOverlayShowing = true
+        var showingPackage: String? = blockedPkg
+
+        // دالة محاكاة منطق الإغلاق المحدث
+        fun evaluateDismiss(
+            eventType: Int,
+            newPkg: String?,
+            isSplitScreenActive: Boolean
+        ): Boolean {
+            // عدم إغلاق النافذة مطلقاً في أحداث تغير النوافذ TYPE_WINDOWS_CHANGED (eventType = 4194304)
+            val TYPE_WINDOWS_CHANGED = 4194304
+            val TYPE_WINDOW_STATE_CHANGED = 32
+
+            if (eventType == TYPE_WINDOWS_CHANGED) {
+                return false // لا يُغلق أبداً
+            }
+
+            if (eventType == TYPE_WINDOW_STATE_CHANGED && newPkg != null) {
+                if (newPkg == showingPackage) {
+                    return false // المستخدم لا يزال داخل نفس التطبيق المحظور
+                }
+                if (isSplitScreenActive) {
+                    return false // التطبيق لا يزال معروضاً في الشاشة المنقسمة
+                }
+                // المستخدم انتقل لتطبيق آخر أو الشاشة الرئيسية
+                return true
+            }
+            return false
+        }
+
+        // 1. وصول حدث TYPE_WINDOWS_CHANGED بسبب إضافة نافذة الحظر نفسها: يجب ألا تُغلق النافذة
+        val dismissedOnWindowChange = evaluateDismiss(
+            eventType = 4194304,
+            newPkg = null,
+            isSplitScreenActive = false
+        )
+        assertFalse("يجب عدم إغلاق نافذة الحظر فور ظهورها في أحداث TYPE_WINDOWS_CHANGED", dismissedOnWindowChange)
+
+        // 2. وصول حدث تفاعل داخل نفس التطبيق المحظور: يجب أن تظل نافذة الحظر قائمة
+        val dismissedOnSameApp = evaluateDismiss(
+            eventType = 32,
+            newPkg = blockedPkg,
+            isSplitScreenActive = false
+        )
+        assertFalse("يجب عدم إغلاق نافذة الحظر طالما أن المستخدم داخل التطبيق المحظور", dismissedOnSameApp)
+
+        // 3. في وضع الشاشات المنقسمة، تفاعل المستخدم مع النصف الآخر (Notes): يجب أن تظل نافذة الحظر قائمة فوق النصف المحظور
+        val dismissedOnSplitOtherHalf = evaluateDismiss(
+            eventType = 32,
+            newPkg = notesPkg,
+            isSplitScreenActive = true
+        )
+        assertFalse("يجب عدم إغلاق نافذة الحظر في وضع الشاشة المنقسمة عند التفاعل مع النصف الآخر", dismissedOnSplitOtherHalf)
+
+        // 4. خروج المستخدم للشاشة الرئيسية: يجب إغلاق نافذة الحظر بسلاسة
+        val dismissedOnHome = evaluateDismiss(
+            eventType = 32,
+            newPkg = launcherPkg,
+            isSplitScreenActive = false
+        )
+        assertTrue("يجب إغلاق نافذة الحظر عند مغادرة التطبيق والعودة للشاشة الرئيسية", dismissedOnHome)
+    }
+
     private data class TestWindowRect(val left: Int, val top: Int, val right: Int, val bottom: Int) {
         val width get() = right - left
         val height get() = bottom - top

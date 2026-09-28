@@ -960,9 +960,15 @@ object BlockOverlayManager {
                 }
 
                 // مطابقة حجم وموقع نافذة التطبيق المفتوح لتغطيته بالكامل (مع فرض ملء الشاشة إذا كان في وضع PiP)
-                val params = if (!isPipMode && windowBounds != null && windowBounds.width() > 0 && windowBounds.height() > 0) {
+                val metrics = context.resources.displayMetrics
+                val isSplitScreen = !isPipMode && windowBounds != null &&
+                        windowBounds.width() > 0 && windowBounds.height() > 0 &&
+                        (windowBounds.height() < (metrics.heightPixels * 0.88f) ||
+                         windowBounds.width() < (metrics.widthPixels * 0.88f))
+
+                val params = if (isSplitScreen) {
                     WindowManager.LayoutParams(
-                        windowBounds.width(),
+                        windowBounds!!.width(),
                         windowBounds.height(),
                         windowBounds.left,
                         windowBounds.top,
