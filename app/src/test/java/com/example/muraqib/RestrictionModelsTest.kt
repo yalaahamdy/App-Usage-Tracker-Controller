@@ -5,6 +5,7 @@ import com.example.muraqib.data.model.BlockReason
 import com.example.muraqib.data.model.LimitPeriod
 import com.example.muraqib.data.model.TimeWindow
 import com.example.muraqib.data.model.isSettingsPackage
+import com.example.muraqib.data.model.isSettingsPopupOrDialog
 import com.example.muraqib.data.repository.AppRestrictionsRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -367,6 +368,116 @@ class RestrictionModelsTest {
         assertTrue(settingsRestriction.appliesTo("com.google.android.settings.intelligence"))
 
         assertFalse(settingsRestriction.appliesTo("com.instagram.android"))
+    }
+
+    @Test
+    fun testSettingsPopupAndDialogExclusionFromBlocking() {
+        // 1. التحقق من التعرف على النوافذ المنبثقة من أسماء الكلاسات
+        assertTrue(isSettingsPopupOrDialog(className = "com.android.settings.bluetooth.BluetoothPairingDialog"))
+        assertTrue(isSettingsPopupOrDialog(className = "com.android.settings.panel.SettingsPanelActivity"))
+        assertTrue(isSettingsPopupOrDialog(className = "com.android.settings.wifi.WifiDialogActivity"))
+        assertTrue(isSettingsPopupOrDialog(className = "android.app.AlertDialog"))
+        assertTrue(isSettingsPopupOrDialog(className = "androidx.appcompat.app.AlertDialog"))
+        assertTrue(isSettingsPopupOrDialog(className = "com.android.systemui.qs.tiles.dialog.InternetDialog"))
+        assertTrue(isSettingsPopupOrDialog(className = "com.google.android.material.bottomsheet.BottomSheetDialog"))
+        assertTrue(isSettingsPopupOrDialog(className = "com.android.settings.wifi.slice.ConnectToWifiHandler"))
+        assertTrue(isSettingsPopupOrDialog(className = "android.widget.PopupWindow"))
+
+        // 2. التحقق من التعرف على الحزم المخصصة للنوافذ المنبثقة ومربعات الحوار والأذونات
+        assertTrue(isSettingsPopupOrDialog(className = null, packageName = "com.android.settings.panel"))
+        assertTrue(isSettingsPopupOrDialog(className = null, packageName = "com.android.permissioncontroller"))
+        assertTrue(isSettingsPopupOrDialog(className = null, packageName = "com.google.android.permissioncontroller"))
+
+        // 3. التحقق من الأبعاد: النوافذ العائمة الأصغر من ملء الشاشة تُعتبر منبثقة
+        assertTrue(
+            isSettingsPopupOrDialog(
+                className = "com.android.settings.SubSettings",
+                packageName = "com.android.settings",
+                windowWidth = 800,
+                windowHeight = 600,
+                screenWidth = 1080,
+                screenHeight = 2400
+            )
+        )
+
+        // 4. تطبيق الإعدادات الرئيسي بملء الشاشة لا يُعتبر نافذة منبثقة ويخضع للحظر إذا تم تقييده
+        assertFalse(
+            isSettingsPopupOrDialog(
+                className = "com.android.settings.Settings",
+                packageName = "com.android.settings",
+                windowWidth = 1080,
+                windowHeight = 2400,
+                screenWidth = 1080,
+                screenHeight = 2400
+            )
+        )
+        assertFalse(
+            isSettingsPopupOrDialog(
+                className = "com.android.settings.homepage.SettingsHomepageActivity",
+                packageName = "com.android.settings",
+                windowWidth = 1080,
+                windowHeight = 2400,
+                screenWidth = 1080,
+                screenHeight = 2400
+            )
+        )
+        assertFalse(
+            isSettingsPopupOrDialog(
+                className = "com.samsung.android.settings.SecSettingsActivity",
+                packageName = "com.samsung.android.settings",
+                windowWidth = 1080,
+                windowHeight = 2400,
+                screenWidth = 1080,
+                screenHeight = 2400
+            )
+        )
+    }
+
+    @Test
+    fun testSettingsOnlyBlockedWhenExplicitlyConfiguredByUser() {
+        val repo = AppRestrictionsRepositoryMock()
+
+        // سيناريو 1: المستخدم حظر تطبيقات أخرى (مثل يوتيوب وإنستغرام) ولم يحظر الإعدادات
+        val otherAppsRestriction = AppRestriction(
+            targetPackages = listOf("com.google.android.youtube", "com.instagram.android"),
+            appName = "ترفيه",
+            isEnabled = true,
+            isTotalBlock = true
+        )
+
+        // التحقق من أن قيد التطبيقات الأخرى لا ينطبق مطلقاً على الإعدادات
+        assertFalse(otherAppsRestriction.appliesTo("com.android.settings"))
+        assertFalse(otherAppsRestriction.appliesTo("com.samsung.android.settings"))
+
+        // محاكاة مستودع القيود: البحث عما إذا كان هناك قيد ينطبق على الإعدادات
+        val restrictionsList = listOf(otherAppsRestriction)
+        val matchedRestrictionForSettings = restrictionsList.find { it.isEnabled && it.appliesTo("com.android.settings") }
+        // لا يوجد أي قيد للإعدادات وبالتالي لا يتم الحظر نهائياً
+        org.junit.Assert.assertNull(matchedRestrictionForSettings)
+
+        // سيناريو 2: المستخدم قام بنفسه بتحديد وإضافة تطبيق الإعدادات للقيد
+        val settingsRestriction = AppRestriction(
+            targetPackages = listOf("com.android.settings"),
+            appName = "الضبط",
+            isEnabled = true,
+            isTotalBlock = true
+        )
+
+        // الآن فقط ينطبق القيد على الإعدادات لأن المستخدم اختارها بنفسه
+        assertTrue(settingsRestriction.appliesTo("com.android.settings"))
+        assertTrue(settingsRestriction.appliesTo("com.samsung.android.settings"))
+
+        val activeListWithSettings = listOf(settingsRestriction)
+        val matchedSettings = activeListWithSettings.find { it.isEnabled && it.appliesTo("com.android.settings") }
+        org.junit.Assert.assertNotNull(matchedSettings)
+
+        val evalSettingsWhenRestricted = repo.evaluate(
+            matchedSettings!!,
+            consumedMinutes = 0,
+            targetPackage = "com.android.settings"
+        )
+        assertTrue(evalSettingsWhenRestricted.isBlocked)
+        assertEquals(BlockReason.TOTAL_BLOCK, evalSettingsWhenRestricted.reason)
     }
 
     /**

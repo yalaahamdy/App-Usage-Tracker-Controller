@@ -274,16 +274,80 @@ fun isSettingsPackage(pkg: String?): Boolean {
     val lower = pkg.lowercase(Locale.getDefault())
     return lower == "com.android.settings" ||
             lower.startsWith("com.android.settings.") ||
-            lower.startsWith("com.google.android.settings") ||
-            lower.startsWith("com.samsung.android.settings") ||
+            lower == "com.google.android.settings" ||
+            lower.startsWith("com.google.android.settings.") ||
+            lower == "com.samsung.android.settings" ||
+            lower.startsWith("com.samsung.android.settings.") ||
             lower == "com.coloros.settings" ||
             lower.startsWith("com.coloros.settings.") ||
             lower == "com.oplus.settings" ||
             lower.startsWith("com.oplus.settings.") ||
             lower == "com.vivo.settings" ||
             lower.startsWith("com.vivo.settings.") ||
-            lower == "com.miui.securitycenter" ||
-            lower.endsWith(".settings") ||
-            lower.contains(".settings.")
+            lower == "com.huawei.settings" ||
+            lower.startsWith("com.huawei.settings.") ||
+            lower == "com.xiaomi.settings" ||
+            lower.startsWith("com.xiaomi.settings.") ||
+            lower == "com.motorola.android.settings" ||
+            lower.startsWith("com.motorola.android.settings.") ||
+            lower == "com.miui.securitycenter"
+}
+
+/**
+ * التحقق مما إذا كان الكائن أو الحدث يمثل نافذة منبثقة أو مربع حوار تابع للضبط
+ * (مثل لوحات الإنترنت والواي فاي، حوارات اقتران البلوتوث، لوحات الصوت، مربعات تأكيد الأذونات)
+ */
+fun isSettingsPopupOrDialog(
+    className: String?,
+    packageName: String? = null,
+    windowWidth: Int = 0,
+    windowHeight: Int = 0,
+    screenWidth: Int = 0,
+    screenHeight: Int = 0
+): Boolean {
+    val cls = className ?: ""
+    val pkg = packageName ?: ""
+
+    // 1. الكلمات الدلالية في اسم الكلاس الدالة صراحة على النوافذ المنبثقة ومربعات الحوار
+    val dialogKeywords = listOf(
+        "Dialog",
+        "AlertDialog",
+        "Panel",
+        "Popup",
+        "BottomSheet",
+        "Slice",
+        "Prompt",
+        "Pairing",
+        "Chooser",
+        "Toast",
+        "Floating"
+    )
+    if (dialogKeywords.any { cls.contains(it, ignoreCase = true) }) {
+        return true
+    }
+
+    // 2. الحزم والمكونات الفرعية لنظام أندرويد المخصصة للنوافذ المنبثقة ومربعات الإعدادات السريعة
+    val popupPackages = listOf(
+        "com.android.settings.panel",
+        "com.android.settings.slices",
+        "com.android.settings.bluetooth.BluetoothPairingDialog",
+        "com.android.settings.wifi.WifiDialogActivity",
+        "com.android.settings.wifi.slice",
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller"
+    )
+    if (popupPackages.any { pkg.startsWith(it) || cls.startsWith(it) }) {
+        return true
+    }
+
+    // 3. التحقق من أبعاد النافذة إذا كانت متوفرة (النوافذ العائمة ومربعات الحوار تشغل أقل من ملء الشاشة)
+    if (windowWidth > 0 && windowHeight > 0 && screenWidth > 0 && screenHeight > 0) {
+        val isNotFullscreen = (windowWidth < screenWidth * 0.92f) || (windowHeight < screenHeight * 0.85f)
+        if (isNotFullscreen) {
+            return true
+        }
+    }
+
+    return false
 }
 

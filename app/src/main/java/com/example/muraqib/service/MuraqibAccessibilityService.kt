@@ -24,6 +24,7 @@ import com.example.muraqib.R
 import com.example.muraqib.data.model.AppRestriction
 import com.example.muraqib.data.model.LimitPeriod
 import com.example.muraqib.data.model.isSettingsPackage
+import com.example.muraqib.data.model.isSettingsPopupOrDialog
 import com.example.muraqib.data.repository.AppInfoManager
 import com.example.muraqib.data.repository.AppRestrictionsRepository
 import com.example.muraqib.data.repository.SecurityRepository
@@ -121,6 +122,15 @@ class MuraqibAccessibilityService : AccessibilityService() {
 
         // 2. فحص وتطبيق الحظر الفوري لتطبيق الضبط/الإعدادات فور فتحه دون أي تأخير
         if (pkgName != null && isSettingsPackage(pkgName)) {
+            // استثناء النوافذ المنبثقة ومربعات الحوار التابعة للضبط تماماً من الحظر
+            if (isSettingsPopupOrDialog(event)) {
+                // إذا كانت نافذة الحظر العائمة معروضة، يتم إخفاؤها للسماح بالتفاعل مع النافذة المنبثقة
+                if (BlockOverlayManager.isShowing && isSettingsPackage(BlockOverlayManager.currentShowingPackage)) {
+                    BlockOverlayManager.dismiss()
+                }
+                return
+            }
+
             if (!::restrictionsRepo.isInitialized) restrictionsRepo = AppRestrictionsRepository.getInstance(this)
             if (!::appInfoManager.isInitialized) appInfoManager = AppInfoManager(this)
 
@@ -172,7 +182,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
         }
 
         // 3. فحص محاولات تعطيل التطبيق أو إلغاء تثبيته أو مسح بياناته أو إيقافه إجبارياً
-        if (pkgName != null && isAttemptingToTamperWithMuraqib(pkgName)) {
+        if (pkgName != null && isAttemptingToTamperWithMuraqib(pkgName, event)) {
             performGlobalAction(GLOBAL_ACTION_HOME)
             val intent = BlockActivity.createIntent(
                 context = this,
@@ -203,7 +213,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
                                 val eval = restrictionsRepo.evaluateRestriction(restriction, consumed, Calendar.getInstance(), nodePkg)
                                 if (eval.isBlocked) {
                                     performGlobalAction(GLOBAL_ACTION_HOME)
-                                    checkAndBlockIfNeeded(nodePkg)
+                                    checkAndBlockIfNeeded(nodePkg, event)
                                     break
                                 }
                             }
@@ -222,7 +232,10 @@ class MuraqibAccessibilityService : AccessibilityService() {
         // 6. إدارة إغلاق نافذة الحظر فقط عندما يغادر المستخدم التطبيق المحظور وينتقل لتطبيق آخر مسموح أو الشاشة الرئيسية
         if (BlockOverlayManager.isShowing && BlockOverlayManager.currentShowingPackage != null) {
             val showingPkg = BlockOverlayManager.currentShowingPackage!!
-            if (!isSameAppOrSubComponent(showingPkg, pkgName)) {
+            // إذا كان المعروض نافذة منبثقة أو مربع حوار من الإعدادات، نغلق نافذة الحظر فوراً للسماح بالتفاعل
+            if (isSettingsPackage(showingPkg) && isSettingsPopupOrDialog(event)) {
+                BlockOverlayManager.dismiss()
+            } else if (!isSameAppOrSubComponent(showingPkg, pkgName)) {
                 // التحقق مما إذا كان التطبيق المحظور لا يزال ظاهراً في شاشة منقسمة نشطة (Split-Screen)
                 val stillInSplit = isPackageVisibleInSplitScreen(showingPkg)
                 if (!stillInSplit) {
@@ -232,14 +245,14 @@ class MuraqibAccessibilityService : AccessibilityService() {
         }
 
         // 7. تقييم وحظر التطبيق النشط الحالي فوراً إذا كان مقيداً
-        checkAndBlockIfNeeded(pkgName)
+        checkAndBlockIfNeeded(pkgName, event)
     }
 
     /**
      * فحص ما إذا كان المستخدم يحاول الدخول لصفحة إعدادات مراقب الاستخدام
      * لإيقافه إجبارياً أو مسح بياناته أو إلغاء تثبيته عبر مثبت الحزم أو تعطيل إمكانية الوصول
      */
-    private fun isAttemptingToTamperWithMuraqib(pkgName: String): Boolean {
+    private fun isAttemptingToTamperWithMuraqib(pkgName: String, event: AccessibilityEvent? = null): Boolean {
         if (!::securityRepo.isInitialized) {
             securityRepo = SecurityRepository(this)
         }
@@ -247,12 +260,16 @@ class MuraqibAccessibilityService : AccessibilityService() {
             return false
         }
 
+        // إذا كان الحدث يمثل نافذة منبثقة أو مربع حوار من الإعدادات، لا نعتبره محاولة عبث أبداً
+        if (event != null && isSettingsPopupOrDialog(event)) {
+            return false
+        }
+
         val isInstaller = pkgName == "com.android.packageinstaller" ||
                 pkgName == "com.google.android.packageinstaller" ||
                 pkgName.contains("packageinstaller")
 
-        val isSettings = pkgName == "com.android.settings" ||
-                pkgName.startsWith("com.android.settings.")
+        val isSettings = isSettingsPackage(pkgName)
 
         if (!isInstaller && !isSettings) return false
 
@@ -271,37 +288,84 @@ class MuraqibAccessibilityService : AccessibilityService() {
             val mentionsMuraqib = combinedText.contains(ourPkg) || combinedText.contains(ourAppName) || combinedText.contains("muraqib")
             if (!mentionsMuraqib) return false
 
+            val className = event?.className?.toString() ?: ""
+
             if (isInstaller) {
-                // في مثبت الحزم، مجرد ذكر تطبيق مراقب يعني محاولة حذفه
-                return true
+                // في مثبت الحزم، التأكد من أنها شاشة إلغاء التثبيت وليست شاشة تثبيت أو طلب أذونات
+                val isUninstallScreen = combinedText.contains("إلغاء التثبيت") ||
+                        combinedText.contains("إلغاء تثبيت") ||
+                        combinedText.contains("uninstall")
+                return isUninstallScreen
             }
 
-            // في تطبيق الإعدادات، نتحقق من وجود إشارات التحكم بالتطبيق لمنع الإيقاف أو مسح البيانات أو إلغاء التثبيت أو تعطيل إمكانية الوصول
-            val hasTamperKeyword = combinedText.contains("إيقاف إجباري") ||
+            // في تطبيق الإعدادات:
+            // استبعاد قوائم التطبيقات العامة وقوائم إمكانية الوصول وقوائم أذونات النظام
+            // الحماية تطبق فقط عندما يكون المستخدم داخل صفحة التفاصيل المحددة لتطبيق "مراقب الاستخدام" تحديداً
+            val isSpecificAppDetailsScreen = className.contains("InstalledAppDetails", ignoreCase = true) ||
+                    className.contains("AppInfo", ignoreCase = true) ||
+                    className.contains("AppDetails", ignoreCase = true) ||
+                    className.contains("AppButtons", ignoreCase = true)
+
+            // إذا كان المستخدم في قائمة عامة (مثل قائمة التطبيقات، إمكانية الوصول، مدير الأذونات)، لا نمنعه من التصفح
+            if (!isSpecificAppDetailsScreen && (className.contains("ManageApplications", ignoreCase = true) ||
+                className.contains("AccessibilitySettings", ignoreCase = true) ||
+                (className.contains("SubSettings", ignoreCase = true) && !combinedText.contains("إيقاف إجباري") && !combinedText.contains("force stop")))
+            ) {
+                return false
+            }
+
+            // التحقق من أزرار الإجراءات التدميرية الصريحة لتطبيق مراقب (إيقاف إجباري، مسح البيانات، إلغاء التثبيت)
+            val hasExplicitTamperAction = combinedText.contains("إيقاف إجباري") ||
                     combinedText.contains("force stop") ||
-                    combinedText.contains("إلغاء التثبيت") ||
-                    combinedText.contains("uninstall") ||
                     combinedText.contains("مسح البيانات") ||
                     combinedText.contains("clear data") ||
                     combinedText.contains("مسح التخزين") ||
                     combinedText.contains("clear storage") ||
-                    combinedText.contains("مكان التخزين") ||
-                    combinedText.contains("storage") ||
-                    combinedText.contains("إلغاء التفعيل") ||
-                    combinedText.contains("deactivate") ||
-                    combinedText.contains("استخدام الخدمة") ||
-                    combinedText.contains("use service") ||
-                    combinedText.contains("إمكانية الوصول") ||
-                    combinedText.contains("accessibility") ||
-                    combinedText.contains("تعطيل") ||
-                    combinedText.contains("disable")
+                    combinedText.contains("إلغاء التثبيت") ||
+                    combinedText.contains("uninstall")
 
-            hasTamperKeyword
+            isSpecificAppDetailsScreen && hasExplicitTamperAction
         } catch (e: Exception) {
             false
         } finally {
             rootNode.recycle()
         }
+    }
+
+    /**
+     * التحقق مما إذا كان الحدث يمثل نافذة منبثقة أو مربع حوار تابع للضبط
+     */
+    private fun isSettingsPopupOrDialog(event: AccessibilityEvent): Boolean {
+        val className = event.className?.toString()
+        val pkgName = event.packageName?.toString()
+
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+
+        var winWidth = 0
+        var winHeight = 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try {
+                val root = rootInActiveWindow
+                if (root != null) {
+                    val rect = Rect()
+                    root.getBoundsInScreen(rect)
+                    winWidth = rect.width()
+                    winHeight = rect.height()
+                    root.recycle()
+                }
+            } catch (e: Exception) {}
+        }
+
+        return isSettingsPopupOrDialog(
+            className = className,
+            packageName = pkgName,
+            windowWidth = winWidth,
+            windowHeight = winHeight,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight
+        )
     }
 
     private fun collectNodeTexts(node: AccessibilityNodeInfo?, list: MutableList<String>) {
@@ -324,7 +388,8 @@ class MuraqibAccessibilityService : AccessibilityService() {
                 pkg.startsWith("com.android.systemui") ||
                 pkg.startsWith("com.google.android.inputmethod") ||
                 pkg.startsWith("com.samsung.android.honeyboard") ||
-                pkg.contains("inputmethod")
+                pkg.contains("inputmethod") ||
+                pkg.contains("permissioncontroller")
     }
 
     private fun isSameAppOrSubComponent(currentPkg: String, newPkg: String): Boolean {
@@ -335,7 +400,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private fun checkAndBlockIfNeeded(targetPackage: String) {
+    private fun checkAndBlockIfNeeded(targetPackage: String, event: AccessibilityEvent? = null) {
         if (!::restrictionsRepo.isInitialized) {
             restrictionsRepo = AppRestrictionsRepository.getInstance(this)
         }
@@ -344,6 +409,14 @@ class MuraqibAccessibilityService : AccessibilityService() {
         }
         if (!::usageStatsManager.isInitialized) {
             usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        }
+
+        val isSettings = isSettingsPackage(targetPackage)
+        if (isSettings && event != null && isSettingsPopupOrDialog(event)) {
+            if (BlockOverlayManager.isShowing && isSettingsPackage(BlockOverlayManager.currentShowingPackage)) {
+                BlockOverlayManager.dismiss()
+            }
+            return
         }
 
         val restriction = restrictionsRepo.getRestrictionForPackage(targetPackage)
@@ -374,9 +447,14 @@ class MuraqibAccessibilityService : AccessibilityService() {
 
         if (evaluation.isBlocked) {
             val now = System.currentTimeMillis()
-            val isSettings = isSettingsPackage(targetPackage)
 
             if (isSettings) {
+                if (event != null && isSettingsPopupOrDialog(event)) {
+                    if (BlockOverlayManager.isShowing && isSettingsPackage(BlockOverlayManager.currentShowingPackage)) {
+                        BlockOverlayManager.dismiss()
+                    }
+                    return
+                }
                 performGlobalAction(GLOBAL_ACTION_HOME)
                 performGlobalAction(GLOBAL_ACTION_BACK)
             }

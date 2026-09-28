@@ -239,7 +239,7 @@ class AppBlockerService : Service() {
             val canDrawOverlay = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
             val isSettingsApp = isSettingsPackage(topPackage)
 
-            if (isSettingsApp) {
+            if (isSettingsApp && !MuraqibAccessibilityService.isServiceRunning) {
                 val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                     addCategory(Intent.CATEGORY_HOME)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
