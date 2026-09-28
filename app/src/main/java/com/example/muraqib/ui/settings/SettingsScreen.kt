@@ -115,6 +115,9 @@ fun SettingsScreen(
     var isDeviceAdminActive by remember {
         mutableStateOf(MuraqibDeviceAdminReceiver.isDeviceAdminActive(context))
     }
+    var isIgnoringBattery by remember {
+        mutableStateOf(com.example.muraqib.security.BootResilienceManager.isIgnoringBatteryOptimizations(context))
+    }
 
     var pendingPinAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var pendingPinTitle by remember { mutableStateOf("") }
@@ -585,6 +588,82 @@ fun SettingsScreen(
                                     securityRepository.setSafeModeProtectionEnabled(true)
                                     isSafeModeProtectionEnabled = true
                                     feedbackMessage = "تم تفعيل حماية الوضع الآمن وتدقيق الإقلاع"
+                                }
+                            }
+                        )
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+
+                    // استثناء التطبيق من تحسين البطارية (Doze Mode)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                com.example.muraqib.security.BootResilienceManager.requestIgnoreBatteryOptimizations(context)
+                                isIgnoringBattery = com.example.muraqib.security.BootResilienceManager.isIgnoringBatteryOptimizations(context)
+                            }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "التشغيل الدائم دون قيود البطارية",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (isIgnoringBattery)
+                                    "مفعل - التطبيق مستثنى من تحسين البطارية لضمان بدء المراقبة فور إعادة التشغيل"
+                                else
+                                    "معطل - انقر لاستثناء التطبيق من توفير الطاقة حتى لا يتعطل بعد إعادة التشغيل",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // إذن بدء التشغيل التلقائي لأجهزة شاومي وسامسونج وهواوي وأوبو
+                    if (com.example.muraqib.security.BootResilienceManager.isOemWithAggressiveBatteryManagement()) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        )
+
+                        SettingsOptionItem(
+                            icon = Icons.Default.Security,
+                            title = "إذن بدء التشغيل التلقائي للجهاز (Autostart)",
+                            subtitle = "فتح إعدادات الشركة المصنعة للسماح للتطبيق بالبدء التلقائي في الخلفية فور إقلاع الهاتف",
+                            onClick = {
+                                val opened = com.example.muraqib.security.BootResilienceManager.openOemAutostartSettings(context)
+                                if (!opened) {
+                                    feedbackMessage = "يرجى التحقق من إعدادات بدء التشغيل التلقائي من مدير التطبيقات بالجهاز"
                                 }
                             }
                         )

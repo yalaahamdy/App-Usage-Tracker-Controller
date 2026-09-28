@@ -80,8 +80,18 @@ class AppBlockerService : Service() {
         securityRepo = com.example.muraqib.data.repository.SecurityRepository(this)
 
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildForegroundNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            androidx.core.app.ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                buildForegroundNotification(),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildForegroundNotification())
+        }
 
+        securityRepo.recordHeartbeat()
         startMonitoringLoop()
     }
 
@@ -344,6 +354,8 @@ class AppBlockerService : Service() {
         val targetPackages = restriction.allPackages.toSet()
         var totalDurationMs = 0L
 
+        val bootTime = now - SystemClock.elapsedRealtime()
+
         try {
             val events = usageStatsManager.queryEvents(startTime, now)
             val event = UsageEvents.Event()
@@ -351,17 +363,29 @@ class AppBlockerService : Service() {
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
+                val time = event.timeStamp
+                val type = event.eventType
+
+                // إغلاق أي جلسات مفتوحة فور حدوث إغلاق للنظام أو إطفاء للشاشة
+                if (type == 16 || type == 26 || type == 27) { // SCREEN_NON_INTERACTIVE, DEVICE_SHUTDOWN, DEVICE_STARTUP
+                    for ((_, start) in startTimes) {
+                        if (time > start) {
+                            totalDurationMs += (time - start)
+                        }
+                    }
+                    startTimes.clear()
+                    continue
+                }
+
                 val pkg = event.packageName ?: continue
                 if (!targetPackages.contains(pkg)) continue
 
-                val time = event.timeStamp
-                if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
-                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && event.eventType == 29)
+                if (type == UsageEvents.Event.ACTIVITY_RESUMED ||
+                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == 29)
                 ) {
                     startTimes[pkg] = time
-                } else if (event.eventType == UsageEvents.Event.ACTIVITY_PAUSED ||
-                    event.eventType == UsageEvents.Event.SCREEN_NON_INTERACTIVE ||
-                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && event.eventType == 30)
+                } else if (type == UsageEvents.Event.ACTIVITY_PAUSED ||
+                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == 30)
                 ) {
                     val start = startTimes.remove(pkg)
                     if (start != null && time > start) {
@@ -370,10 +394,14 @@ class AppBlockerService : Service() {
                 }
             }
 
-            // إضافة وقت الجلسة النشطة حالياً
+            // إضافة وقت الجلسة النشطة حالياً مع عزل وتأمين فترة توقف الهاتف وإعادة التشغيل
             for ((_, start) in startTimes) {
-                if (now > start) {
+                if (start >= bootTime && now > start) {
                     totalDurationMs += (now - start)
+                } else if (start < bootTime) {
+                    // جلسة لم تسجل إغلاقاً قبل الإقلاع؛ لا تحتسب فترة إيقاف الهاتف
+                    val safeDuration = (bootTime - start).coerceIn(0L, 60_000L)
+                    totalDurationMs += safeDuration
                 }
             }
         } catch (e: Exception) {

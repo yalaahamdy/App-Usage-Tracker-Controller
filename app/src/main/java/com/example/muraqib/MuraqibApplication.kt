@@ -37,10 +37,8 @@ class MuraqibApplication : Application() {
 
     private fun restoreServicesIfNeeded() {
         try {
-            val repo = AppRestrictionsRepository.getInstance(this)
-            val hasActive = repo.getAllRestrictions().any { it.isEnabled }
-            if (hasActive) {
-                AppBlockerService.start(this)
+            if (androidx.core.os.UserManagerCompat.isUserUnlocked(this)) {
+                com.example.muraqib.security.BootResilienceManager.restoreServicesOnBoot(this)
             }
         } catch (e: Exception) {
             Log.e("MuraqibApp", "Error restoring blocker service on process start", e)

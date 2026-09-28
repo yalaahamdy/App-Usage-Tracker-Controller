@@ -425,6 +425,8 @@ class AppRestrictionsRepository(context: Context) {
         val targetPackages = restriction.allPackages.toSet()
         var totalDurationMs = 0L
 
+        val bootTime = now - android.os.SystemClock.elapsedRealtime()
+
         try {
             val events = usageStatsManager.queryEvents(startTime, now)
             val event = android.app.usage.UsageEvents.Event()
@@ -432,17 +434,29 @@ class AppRestrictionsRepository(context: Context) {
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
+                val time = event.timeStamp
+                val type = event.eventType
+
+                // إغلاق أي جلسات مفتوحة فور حدوث إغلاق للنظام أو إطفاء للشاشة
+                if (type == 16 || type == 26 || type == 27) { // SCREEN_NON_INTERACTIVE, DEVICE_SHUTDOWN, DEVICE_STARTUP
+                    for ((_, start) in startTimes) {
+                        if (time > start) {
+                            totalDurationMs += (time - start)
+                        }
+                    }
+                    startTimes.clear()
+                    continue
+                }
+
                 val pkg = event.packageName ?: continue
                 if (!targetPackages.contains(pkg)) continue
 
-                val time = event.timeStamp
-                if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ||
-                    (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && event.eventType == 29)
+                if (type == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ||
+                    (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && type == 29)
                 ) {
                     startTimes[pkg] = time
-                } else if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED ||
-                    event.eventType == android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE ||
-                    (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && event.eventType == 30)
+                } else if (type == android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED ||
+                    (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && type == 30)
                 ) {
                     val start = startTimes.remove(pkg)
                     if (start != null && time > start) {
@@ -452,8 +466,11 @@ class AppRestrictionsRepository(context: Context) {
             }
 
             for ((_, start) in startTimes) {
-                if (now > start) {
+                if (start >= bootTime && now > start) {
                     totalDurationMs += (now - start)
+                } else if (start < bootTime) {
+                    val safeDuration = (bootTime - start).coerceIn(0L, 60_000L)
+                    totalDurationMs += safeDuration
                 }
             }
         } catch (e: Exception) {

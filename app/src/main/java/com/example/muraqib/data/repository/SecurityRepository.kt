@@ -80,7 +80,12 @@ class SecurityRepository(context: Context) {
      * تسجيل نبضة نشاط زمنية مستمرة لمراقبة الفترات التي قد يتعطل فيها التطبيق
      */
     fun recordHeartbeat() {
-        prefs.edit().putLong(KEY_LAST_HEARTBEAT_TIMESTAMP, System.currentTimeMillis()).apply()
+        val now = System.currentTimeMillis()
+        val lastHeartbeat = getLastHeartbeatTimestamp()
+        if (lastHeartbeat > 0L && now < (lastHeartbeat - 60_000L) && isSafeModeProtectionEnabled()) {
+            recordSafeModeViolation("تم رصد تقديم أو تأخير ساعة النظام يدوياً لتجاوز قيود الاستخدام.")
+        }
+        prefs.edit().putLong(KEY_LAST_HEARTBEAT_TIMESTAMP, now).apply()
     }
 
     fun getLastHeartbeatTimestamp(): Long {

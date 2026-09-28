@@ -63,6 +63,13 @@ An enterprise-grade, offline-first Android application designed to boost digital
 - **الاعتراض الذكي لبرامج إلغاء التثبيت (Smart Anti-Uninstall):** رصد أي محاولة لفتح مثبت الحزم (`PackageInstaller`) لحذف مراقب واعتراضها فوراً.
 - **حماية الإعدادات الأمنية برمز PIN:** اشتراط تأكيد رمز المرور (PIN) قبل السماح بتعطيل أي درع حماية أو إلغاء صلاحية مسؤول الجهاز.
 
+### 9. ضمان الصمود والاستمرارية بعد إعادة تشغيل الهاتف (Reboot Survival & Resilience)
+- **التوافق التام مع الإقلاع المباشر (Direct Boot & User Unlock):** معالجة متقدمة لطبقات التشفير تمنع أي انهيار للمستقبلات قبل فك القفل الأولي للشاشة، مع استجابة فورية لأحداث `ACTION_BOOT_COMPLETED` و `ACTION_USER_UNLOCKED`.
+- **استعادة مؤقتات التخطي المؤقت (Bypass Timers Restoration):** الحفاظ على الطوابع الزمنية للتخطي المؤقت بدقة الثواني؛ فإذا تمت إعادة تشغيل الهاتف أثناء فترة التخطي، يتم احتساب الوقت المتبقي فقط واستئناف الحظر فور انتهاء الدقائق المصرح بها.
+- **عزل فترة إطفاء الهاتف ومنع تضخم الاستهلاك (Reboot-Aware Consumption Calculation):** رصد أحداث إغلاق وبدء تشغيل النظام (`DEVICE_SHUTDOWN` و `DEVICE_STARTUP`) لضمان عدم احتساب ساعات إيقاف تشغيل الهاتف ضمن وقت استهلاك التطبيقات المقيدة.
+- **استثناء تحسين البطارية وبدء التشغيل التلقائي (Battery Exemption & OEM Autostart):** دعم مدمج لطلب استثناء التطبيق من تحسينات البطارية (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)، مع توجيه ذكي لإعدادات البدء التلقائي لأجهزة شاومي وسامسونج وهواوي وأوبو وفيفو.
+- **كشف التلاعب بالساعة (Clock Rollback Detection):** رصد ومكافحة أي محاولات لتأخير أو تقديم ساعة الجهاز يدوياً بعد إعادة التشغيل للالتفاف على الحدود الزمنية أو الجداول المجدولة.
+
 ---
 
 ## الأمان والخصوصية (Privacy & Security)
@@ -88,7 +95,8 @@ com.example.muraqib/
 │   ├── MuraqibDeviceAdminReceiver.kt   # Device Admin protection against uninstall
 │   └── BootReceiver.kt                 # Boot audit & Safe Mode detection trigger
 ├── security/
-│   └── SafeModeManager.kt              # Safe Mode detection, audit & heartbeat tracking
+│   ├── SafeModeManager.kt              # Safe Mode detection, audit & heartbeat tracking
+│   └── BootResilienceManager.kt        # Reboot survival, OEM autostart & battery optimization
 ├── service/
 │   ├── MuraqibAccessibilityService.kt  # Real-time app detection, PiP & split-screen shields
 │   ├── AppBlockerService.kt            # Periodic background blocker service & heartbeat
@@ -130,16 +138,16 @@ com.example.muraqib/
 ### تحميل حزمة التطبيق الجاهزة (Pre-built APK)
 يمكنك تحميل أحدث نسخة مستقرة ومبنية وجاهزة للتثبيت مباشرة من صفحة الإصدارات:
 - **[صفحة الإصدارات على GitHub (GitHub Releases)](https://github.com/yalaahamdy/App-Usage-Tracker-Controller/releases)**
-- الإصدار الحالي: `v1.1.0`
-- اسم الملف: `Muraqib-v1.1.0.apk`
+- الإصدار الحالي: `v1.1.1`
+- اسم الملف: `Muraqib-v1.1.1.apk`
 - التجزئة الرقمية للتحقق (SHA-256):
   ```text
-  93A1FC79161DFCB9F1D71654D849BD67226AEDDA71A3E50111785FE923B2B06E
+  A9894E238E459CA40924813B95E0873DD393203164AE57B32E1EEB219F3A8188
   ```
 
 ### التثبيت عبر ADB
 ```bash
-adb install -r Muraqib-v1.1.0.apk
+adb install -r Muraqib-v1.1.1.apk
 ```
 
 ---

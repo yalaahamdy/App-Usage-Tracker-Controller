@@ -107,18 +107,29 @@ object SafeModeManager {
 
                 while (events.hasNextEvent()) {
                     events.getNextEvent(event)
+                    val eventTime = event.timeStamp
+                    val type = event.eventType
+
+                    if (type == 16 || type == 26 || type == 27) { // SCREEN_NON_INTERACTIVE, DEVICE_SHUTDOWN, DEVICE_STARTUP
+                        for ((_, start) in sessionStarts) {
+                            if (eventTime > start) {
+                                totalUnauthorizedDurationMs += (eventTime - start)
+                            }
+                        }
+                        sessionStarts.clear()
+                        continue
+                    }
+
                     val pkg = event.packageName ?: continue
                     if (!restrictedPackages.contains(pkg)) continue
 
-                    val eventTime = event.timeStamp
-                    if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
-                        (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && event.eventType == 29)
+                    if (type == UsageEvents.Event.ACTIVITY_RESUMED ||
+                        (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == 29)
                     ) {
                         sessionStarts[pkg] = eventTime
                         unauthorizedFound.add(pkg)
-                    } else if (event.eventType == UsageEvents.Event.ACTIVITY_PAUSED ||
-                        event.eventType == UsageEvents.Event.SCREEN_NON_INTERACTIVE ||
-                        (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && event.eventType == 30)
+                    } else if (type == UsageEvents.Event.ACTIVITY_PAUSED ||
+                        (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == 30)
                     ) {
                         val start = sessionStarts.remove(pkg)
                         if (start != null && eventTime > start) {
@@ -127,15 +138,25 @@ object SafeModeManager {
                     }
                 }
 
-                // إضافة الجلسات المفتوحة التي لم تُغلق قبل الإقلاع
+                // إضافة الجلسات المفتوحة التي لم تُغلق قبل الإقلاع مع مراعاة وقت الإقلاع
                 for ((_, start) in sessionStarts) {
-                    if (currentTime > start) {
+                    if (start >= currentBootTime && currentTime > start) {
                         totalUnauthorizedDurationMs += (currentTime - start)
+                    } else if (start < currentBootTime) {
+                        val safeDuration = (currentBootTime - start).coerceIn(0L, 60_000L)
+                        totalUnauthorizedDurationMs += safeDuration
                     }
                 }
             } catch (e: Exception) {
                 // في حال تعذر الاستعلام نتجاوز بهدوء
             }
+        }
+
+        // فحص التلاعب بالوقت عبر تأخير ساعة النظام للخلف بعد إعادة التشغيل
+        val hasClockTampering = lastHeartbeat > 0L && currentTime < (lastHeartbeat - 60_000L)
+        if (hasClockTampering) {
+            val clockMessage = "تم رصد تقديم أو تأخير ساعة النظام يدوياً لتجاوز قيود الاستخدام."
+            securityRepo.recordSafeModeViolation(clockMessage)
         }
 
         val unauthorizedMinutes = (totalUnauthorizedDurationMs / 60_000L).toInt()
