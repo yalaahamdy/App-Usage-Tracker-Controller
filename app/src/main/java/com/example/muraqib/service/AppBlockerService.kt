@@ -1,6 +1,7 @@
 package com.example.muraqib.service
 
 import android.app.AlarmManager
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,8 +9,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -43,11 +46,30 @@ class AppBlockerService : Service() {
     private lateinit var appInfoManager: AppInfoManager
     private lateinit var usageStatsManager: UsageStatsManager
     private lateinit var powerManager: PowerManager
+    private lateinit var keyguardManager: KeyguardManager
     private lateinit var securityRepo: com.example.muraqib.data.repository.SecurityRepository
 
     private var lastBlockedPackage: String? = null
     private var lastBlockTimestamp: Long = 0L
     private var lastHeartbeatTime: Long = 0L
+
+    private val screenOffReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                if (BlockOverlayManager.isShowing || lastBlockedPackage != null) {
+                    val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_HOME)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    try {
+                        startActivity(homeIntent)
+                    } catch (e: Exception) {}
+                    BlockOverlayManager.dismiss()
+                    lastBlockedPackage = null
+                }
+            }
+        }
+    }
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "muraqib_blocker_channel"
@@ -78,7 +100,21 @@ class AppBlockerService : Service() {
         appInfoManager = AppInfoManager(this)
         usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         securityRepo = com.example.muraqib.data.repository.SecurityRepository(this)
+
+        try {
+            val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenOffReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(screenOffReceiver, filter)
+            }
+        } catch (e: Exception) {
+            try {
+                registerReceiver(screenOffReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+            } catch (ignored: Exception) {}
+        }
 
         createNotificationChannel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -132,6 +168,9 @@ class AppBlockerService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceJob.cancel()
+        try {
+            unregisterReceiver(screenOffReceiver)
+        } catch (e: Exception) {}
     }
 
     private fun startMonitoringLoop() {
@@ -144,8 +183,11 @@ class AppBlockerService : Service() {
                         securityRepo.recordHeartbeat()
                     }
 
-                    // إذا كانت الشاشة مغلقة، ننتظر لتوفير البطارية
-                    if (!powerManager.isInteractive) {
+                    // إذا كانت الشاشة مغلقة أو الهاتف مقفلاً، ننتظر لتوفير البطارية وتفادي إظهار أي شاشات حظر
+                    if (!powerManager.isInteractive || keyguardManager.isKeyguardLocked) {
+                        if (BlockOverlayManager.isShowing) {
+                            BlockOverlayManager.dismiss()
+                        }
                         delay(3000)
                         continue
                     }
@@ -161,6 +203,13 @@ class AppBlockerService : Service() {
     }
 
     private fun checkForegroundApp() {
+        if (!powerManager.isInteractive || keyguardManager.isKeyguardLocked) {
+            if (BlockOverlayManager.isShowing) {
+                BlockOverlayManager.dismiss()
+            }
+            return
+        }
+
         val now = System.currentTimeMillis()
         val events = usageStatsManager.queryEvents(now - 45_000, now)
         val event = UsageEvents.Event()
@@ -269,7 +318,7 @@ class AppBlockerService : Service() {
                 startActivity(blockIntent)
             } catch (e: Exception) {}
 
-            showFullScreenBlockNotification(blockIntent, appName, evaluation.detailedReasonText)
+            showBlockNotification(blockIntent, appName, evaluation.detailedReasonText)
 
             if (canDrawOverlay) {
                 // إظهار النافذة العائمة فوق التطبيق المحظور مباشرة
@@ -298,13 +347,12 @@ class AppBlockerService : Service() {
         }
     }
 
-    private fun showFullScreenBlockNotification(intent: Intent, appName: String, reason: String) {
+    private fun showBlockNotification(intent: Intent, appName: String, reason: String) {
         val channelId = "muraqib_block_alert_channel"
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "تنبيهات الحظر", NotificationManager.IMPORTANCE_HIGH).apply {
+            val channel = NotificationChannel(channelId, "تنبيهات الحظر", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = "إشعار حظر التطبيق المقيد"
-                setBypassDnd(true)
             }
             notificationManager.createNotificationChannel(channel)
         }
@@ -320,9 +368,8 @@ class AppBlockerService : Service() {
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setContentTitle("مراقب الاستخدام - تطبيق مقيد")
             .setContentText("تم حظر $appName: $reason")
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setFullScreenIntent(pendingIntent, true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()
 

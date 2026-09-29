@@ -2,18 +2,22 @@ package com.example.muraqib.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.accessibility.AccessibilityEvent
@@ -41,10 +45,24 @@ class MuraqibAccessibilityService : AccessibilityService() {
     private lateinit var appInfoManager: AppInfoManager
     private lateinit var usageStatsManager: UsageStatsManager
     private lateinit var securityRepo: SecurityRepository
+    private lateinit var powerManager: PowerManager
+    private lateinit var keyguardManager: KeyguardManager
     private val handler = Handler(Looper.getMainLooper())
 
     private var lastBlockedPackage: String? = null
     private var lastBlockTimestamp: Long = 0L
+
+    private val screenOffReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                if (BlockOverlayManager.isShowing || lastBlockedPackage != null) {
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    BlockOverlayManager.dismiss()
+                    lastBlockedPackage = null
+                }
+            }
+        }
+    }
 
     companion object {
         var isServiceRunning: Boolean = false
@@ -87,6 +105,21 @@ class MuraqibAccessibilityService : AccessibilityService() {
         appInfoManager = AppInfoManager(this)
         usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         securityRepo = SecurityRepository(this)
+        powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+
+        try {
+            val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenOffReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(screenOffReceiver, filter)
+            }
+        } catch (e: Exception) {
+            try {
+                registerReceiver(screenOffReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+            } catch (ignored: Exception) {}
+        }
 
         val info = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOWS_CHANGED
@@ -109,6 +142,19 @@ class MuraqibAccessibilityService : AccessibilityService() {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED
         ) {
+            return
+        }
+
+        if (!::powerManager.isInitialized) {
+            powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        }
+        if (!::keyguardManager.isInitialized) {
+            keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        }
+        if (!powerManager.isInteractive || keyguardManager.isKeyguardLocked) {
+            if (BlockOverlayManager.isShowing) {
+                BlockOverlayManager.dismiss()
+            }
             return
         }
 
@@ -401,6 +447,19 @@ class MuraqibAccessibilityService : AccessibilityService() {
     }
 
     private fun checkAndBlockIfNeeded(targetPackage: String, event: AccessibilityEvent? = null) {
+        if (!::powerManager.isInitialized) {
+            powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        }
+        if (!::keyguardManager.isInitialized) {
+            keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        }
+        if (!powerManager.isInteractive || keyguardManager.isKeyguardLocked) {
+            if (BlockOverlayManager.isShowing) {
+                BlockOverlayManager.dismiss()
+            }
+            return
+        }
+
         if (!::restrictionsRepo.isInitialized) {
             restrictionsRepo = AppRestrictionsRepository.getInstance(this)
         }
@@ -793,5 +852,8 @@ class MuraqibAccessibilityService : AccessibilityService() {
         super.onDestroy()
         isServiceRunning = false
         instance = null
+        try {
+            unregisterReceiver(screenOffReceiver)
+        } catch (e: Exception) {}
     }
 }

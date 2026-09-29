@@ -7,10 +7,12 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.app.KeyguardManager
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
@@ -66,6 +68,12 @@ object BlockOverlayManager {
     ) {
         val isAccessibility = context is AccessibilityService
 
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        if (pm?.isInteractive == false || km?.isKeyguardLocked == true) {
+            return
+        }
+
         // إذا لم تكن خدمة وصول، نتحقق من إذن الظهور
         if (!isAccessibility && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
             return
@@ -73,6 +81,10 @@ object BlockOverlayManager {
 
         mainHandler.post {
             try {
+                if (pm?.isInteractive == false || km?.isKeyguardLocked == true) {
+                    return@post
+                }
+
                 if (isShowing && currentShowingPackage == packageName) {
                     return@post
                 }
@@ -997,6 +1009,16 @@ object BlockOverlayManager {
                 overlayRootView = rootView
                 currentShowingPackage = packageName
             } catch (e: Exception) {
+                // إذا فشل إظهار النافذة العائمة والشاشة مغلقة أو مقفلة، نكتفي بالرجوع للرئيسية دون تشغيل شاشات قد توقظ الهاتف
+                val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+                if (pm?.isInteractive == false || km?.isKeyguardLocked == true) {
+                    try {
+                        onHomeAction?.invoke()
+                    } catch (ignored: Exception) {}
+                    return@post
+                }
+
                 // خطة أمان بديلة: إذا تعذر إضافة النافذة العائمة فوق هذا التطبيق، نطلق شاشة الحظر الكاملة
                 try {
                     if (onHomeAction != null) {
