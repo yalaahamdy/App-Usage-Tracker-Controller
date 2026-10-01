@@ -67,6 +67,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.muraqib.data.model.AppRestriction
 import com.example.muraqib.data.model.AppUsageInfo
+import com.example.muraqib.data.model.GroupLimitType
 import com.example.muraqib.data.model.LimitPeriod
 import com.example.muraqib.data.model.TimeWindow
 import com.example.muraqib.data.repository.AppInfoManager
@@ -110,6 +111,7 @@ fun AddEditRestrictionDialog(
     var hasUsageLimit by remember { mutableStateOf(initialRestriction?.hasUsageLimit ?: (!isTotalBlock)) }
     var limitMinutes by remember { mutableIntStateOf(initialRestriction?.limitDurationMinutes ?: 30) }
     var limitPeriod by remember { mutableStateOf(initialRestriction?.limitPeriod ?: LimitPeriod.DAILY) }
+    var groupLimitType by remember { mutableStateOf(initialRestriction?.groupLimitType ?: GroupLimitType.EACH_APP) }
 
     // جدول الساعات
     var hasSchedule by remember { mutableStateOf(initialRestriction?.hasSchedule ?: false) }
@@ -396,6 +398,53 @@ fun AddEditRestrictionDialog(
                                             onValueChange = { limitMinutes = it.toInt().coerceAtLeast(1) },
                                             valueRange = 1f..(if (limitPeriod == LimitPeriod.DAILY) 480f else 2400f)
                                         )
+
+                                        // إذا تم اختيار أكثر من تطبيق، يتم توفير خيار تحديد نمط تطبيق الحد
+                                        if (selectedPackages.size > 1) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(MaterialTheme.colorScheme.surface)
+                                                    .padding(10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "طريقة احتساب الحد للمجموعة:",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    FilterChip(
+                                                        selected = groupLimitType == GroupLimitType.EACH_APP,
+                                                        onClick = { groupLimitType = GroupLimitType.EACH_APP },
+                                                        label = { Text("لكل تطبيق على حدة (موصى به)", style = MaterialTheme.typography.labelSmall) },
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+
+                                                    FilterChip(
+                                                        selected = groupLimitType == GroupLimitType.SHARED_SUM,
+                                                        onClick = { groupLimitType = GroupLimitType.SHARED_SUM },
+                                                        label = { Text("إجمالي مشترك للمجموعة", style = MaterialTheme.typography.labelSmall) },
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                }
+
+                                                Text(
+                                                    text = if (groupLimitType == GroupLimitType.EACH_APP) {
+                                                        "يحصل كل تطبيق في المجموعة على حد $durationText مستقلاً خاصاً به، ولن يؤدي استهلاك أحدهما إلى حظر الآخر."
+                                                    } else {
+                                                        "يُحسب الاستهلاك التراكمي لجميع تطبيقات المجموعة معاً، وتُحظر جميعاً فور وصول المجموع إلى $durationText."
+                                                    },
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -584,7 +633,8 @@ fun AddEditRestrictionDialog(
                             limitPeriod = limitPeriod,
                             hasSchedule = if (isTotalBlock) false else hasSchedule,
                             timeWindows = timeWindows,
-                            activeDays = activeDays
+                            activeDays = activeDays,
+                            groupLimitType = groupLimitType
                         )
                         onSave(restriction)
                     },

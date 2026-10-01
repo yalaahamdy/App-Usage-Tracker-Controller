@@ -2,6 +2,7 @@ package com.example.muraqib
 
 import com.example.muraqib.data.model.AppRestriction
 import com.example.muraqib.data.model.BlockReason
+import com.example.muraqib.data.model.GroupLimitType
 import com.example.muraqib.data.model.LimitPeriod
 import com.example.muraqib.data.model.TimeWindow
 import com.example.muraqib.data.model.isSettingsPackage
@@ -478,6 +479,111 @@ class RestrictionModelsTest {
         )
         assertTrue(evalSettingsWhenRestricted.isBlocked)
         assertEquals(BlockReason.TOTAL_BLOCK, evalSettingsWhenRestricted.reason)
+    }
+
+    @Test
+    fun testGroupLimitTypeEachAppIndependentLimits() {
+        val repo = AppRestrictionsRepositoryMock()
+        val multiAppRestriction = AppRestriction(
+            appName = "مجموعة المراسلة",
+            targetPackages = listOf("com.whatsapp", "org.telegram.messenger"),
+            isEnabled = true,
+            hasUsageLimit = true,
+            limitDurationMinutes = 30,
+            groupLimitType = GroupLimitType.EACH_APP
+        )
+
+        // سيناريو: واتساب استهلك 30 دقيقة وتلجرام استهلك 10 دقائق
+        val whatsappUsage = 30
+        val telegramUsage = 10
+
+        // فحص واتساب: بلغ الحد الأقصى (30 دقيقة) فيجب حظره
+        val whatsappEval = repo.evaluate(
+            multiAppRestriction,
+            consumedMinutes = whatsappUsage,
+            targetPackage = "com.whatsapp"
+        )
+        assertTrue(whatsappEval.isBlocked)
+        assertEquals(BlockReason.LIMIT_EXCEEDED, whatsappEval.reason)
+
+        // فحص تلجرام: استهلك 10 دقائق فقط من أصل 30 دقيقة المستقلة له، فلا يجوز حظره
+        val telegramEval = repo.evaluate(
+            multiAppRestriction,
+            consumedMinutes = telegramUsage,
+            targetPackage = "org.telegram.messenger"
+        )
+        assertFalse(telegramEval.isBlocked)
+        assertEquals(BlockReason.NONE, telegramEval.reason)
+    }
+
+    @Test
+    fun testGroupLimitTypeSharedSumEvaluation() {
+        val repo = AppRestrictionsRepositoryMock()
+        val sharedRestriction = AppRestriction(
+            appName = "مجموعة التواصل المشتركة",
+            targetPackages = listOf("com.whatsapp", "org.telegram.messenger"),
+            isEnabled = true,
+            hasUsageLimit = true,
+            limitDurationMinutes = 30,
+            groupLimitType = GroupLimitType.SHARED_SUM
+        )
+
+        // استهلاك تراكمي مشترك 35 دقيقة (تجاوز الحد المشترك 30 د)
+        val combinedUsage = 35
+        val eval = repo.evaluate(
+            sharedRestriction,
+            consumedMinutes = combinedUsage,
+            targetPackage = "org.telegram.messenger"
+        )
+        assertTrue(eval.isBlocked)
+        assertEquals(BlockReason.LIMIT_EXCEEDED, eval.reason)
+
+        // استهلاك تراكمي مشترك 25 دقيقة (أقل من الحد المشترك)
+        val evalUnder = repo.evaluate(
+            sharedRestriction,
+            consumedMinutes = 25,
+            targetPackage = "org.telegram.messenger"
+        )
+        assertFalse(evalUnder.isBlocked)
+        assertEquals(BlockReason.NONE, evalUnder.reason)
+    }
+
+    @Test
+    fun testGroupLimitTypeJsonCompatibility() {
+        // 1. كائن جديد بدون تحديد نمط يجب أن يأخذ الافتراضي EACH_APP
+        val defaultRestriction = AppRestriction(
+            appName = "مجموعة تجريبية",
+            targetPackages = listOf("app.one", "app.two")
+        )
+        assertEquals(GroupLimitType.EACH_APP, defaultRestriction.groupLimitType)
+
+        // 2. تحويل كائن بنمط EACH_APP إلى JSON واستعادته
+        val jsonEach = defaultRestriction.toJsonObject()
+        val restoredEach = AppRestriction.fromJsonObject(jsonEach)
+        assertEquals(GroupLimitType.EACH_APP, restoredEach.groupLimitType)
+
+        // 3. تحويل كائن بنمط SHARED_SUM إلى JSON واستعادته
+        val sharedRestriction = defaultRestriction.copy(groupLimitType = GroupLimitType.SHARED_SUM)
+        val jsonShared = sharedRestriction.toJsonObject()
+        val restoredShared = AppRestriction.fromJsonObject(jsonShared)
+        assertEquals(GroupLimitType.SHARED_SUM, restoredShared.groupLimitType)
+
+        // 4. التوافق العكسي مع JSON قديم لا يحتوي على مفتاح groupLimitType نهائياً
+        val legacyJson = org.json.JSONObject().apply {
+            put("id", "legacy-id-123")
+            put("appName", "مجموعة قديمة")
+            put("packageName", "app.one")
+            put("targetPackages", org.json.JSONArray().apply {
+                put("app.one")
+                put("app.two")
+            })
+            put("isEnabled", true)
+            put("hasUsageLimit", true)
+            put("limitDurationMinutes", 30)
+        }
+        val restoredLegacy = AppRestriction.fromJsonObject(legacyJson)
+        // يجب أن يُفسر تلقائياً على أنه EACH_APP لحل مشكلة المستخدم القديمة دون تدخل منه
+        assertEquals(GroupLimitType.EACH_APP, restoredLegacy.groupLimitType)
     }
 
     /**

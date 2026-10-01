@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.example.muraqib.data.model.AppRestriction
 import com.example.muraqib.data.model.BlockReason
+import com.example.muraqib.data.model.GroupLimitType
 import com.example.muraqib.data.model.LimitPeriod
 import com.example.muraqib.data.model.RestrictionEvaluation
 import com.example.muraqib.data.model.TimeWindow
@@ -425,10 +426,14 @@ class AppRestrictionsRepository(context: Context) {
     }
 
     /**
-     * حساب الدقائق المستهلكة بدقة عالية في الوقت الحقيقي لتطبيق أو مجموعة تطبيقات
+     * حساب الدقائق المستهلكة بدقة عالية في الوقت الحقيقي لكل تطبيق مشمول في القيد
+     * يُعيد خريطة (Map) تربط اسم كل حزمة بعدد الدقائق المستهلكة لها
      */
-    fun calculateConsumedMinutes(context: Context, restriction: AppRestriction): Int {
-        if (restriction.isTotalBlock) return 0
+    fun calculatePackageUsageMap(context: Context, restriction: AppRestriction): Map<String, Int> {
+        val targetPackages = restriction.allPackages.toSet()
+        if (targetPackages.isEmpty() || restriction.isTotalBlock) {
+            return targetPackages.associateWith { 0 }
+        }
 
         val calendar = Calendar.getInstance()
         val now = System.currentTimeMillis()
@@ -451,10 +456,10 @@ class AppRestrictionsRepository(context: Context) {
             }
         }
 
-        val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager ?: return 0
-        val targetPackages = restriction.allPackages.toSet()
-        var totalDurationMs = 0L
+        val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager
+            ?: return targetPackages.associateWith { 0 }
 
+        val durations = targetPackages.associateWith { 0L }.toMutableMap()
         val bootTime = now - android.os.SystemClock.elapsedRealtime()
 
         try {
@@ -469,9 +474,9 @@ class AppRestrictionsRepository(context: Context) {
 
                 // إغلاق أي جلسات مفتوحة فور حدوث إغلاق للنظام أو إطفاء للشاشة
                 if (type == 16 || type == 26 || type == 27) { // SCREEN_NON_INTERACTIVE, DEVICE_SHUTDOWN, DEVICE_STARTUP
-                    for ((_, start) in startTimes) {
+                    for ((pkg, start) in startTimes) {
                         if (time > start) {
-                            totalDurationMs += (time - start)
+                            durations[pkg] = (durations[pkg] ?: 0L) + (time - start)
                         }
                     }
                     startTimes.clear()
@@ -490,17 +495,17 @@ class AppRestrictionsRepository(context: Context) {
                 ) {
                     val start = startTimes.remove(pkg)
                     if (start != null && time > start) {
-                        totalDurationMs += (time - start)
+                        durations[pkg] = (durations[pkg] ?: 0L) + (time - start)
                     }
                 }
             }
 
-            for ((_, start) in startTimes) {
+            for ((pkg, start) in startTimes) {
                 if (start >= bootTime && now > start) {
-                    totalDurationMs += (now - start)
+                    durations[pkg] = (durations[pkg] ?: 0L) + (now - start)
                 } else if (start < bootTime) {
                     val safeDuration = (bootTime - start).coerceIn(0L, 60_000L)
-                    totalDurationMs += safeDuration
+                    durations[pkg] = (durations[pkg] ?: 0L) + safeDuration
                 }
             }
         } catch (e: Exception) {
@@ -511,11 +516,81 @@ class AppRestrictionsRepository(context: Context) {
                     now
                 )
                 stats?.filter { targetPackages.contains(it.packageName) }?.forEach {
-                    totalDurationMs += it.totalTimeInForeground
+                    durations[it.packageName] = (durations[it.packageName] ?: 0L) + it.totalTimeInForeground
                 }
             } catch (ex: Exception) {}
         }
 
-        return (totalDurationMs / 60000L).toInt()
+        // خطة بديلة في حال كانت النتائج صفرية لجميع الحزم
+        if (durations.values.all { it == 0L }) {
+            try {
+                val stats = usageStatsManager.queryUsageStats(
+                    android.app.usage.UsageStatsManager.INTERVAL_BEST,
+                    startTime,
+                    now
+                )
+                stats?.filter { targetPackages.contains(it.packageName) }?.forEach {
+                    durations[it.packageName] = (durations[it.packageName] ?: 0L) + it.totalTimeInForeground
+                }
+            } catch (ex: Exception) {}
+        }
+
+        return durations.mapValues { (_, ms) -> (ms / 60_000L).toInt() }
+    }
+
+    /**
+     * حساب الدقائق المستهلكة بدقة عالية في الوقت الحقيقي لتطبيق أو لمجموعة تطبيقات
+     * @param targetPackage التطبيق المحدد المطلوب معرفة استهلاكه.
+     * إذا كان النمط EACH_APP، يُحسب استهلاك targetPackage فقط، وإذا كان SHARED_SUM يُحسب إجمالي المجموعة.
+     */
+    fun calculateConsumedMinutes(
+        context: Context,
+        restriction: AppRestriction,
+        targetPackage: String? = null
+    ): Int {
+        if (restriction.isTotalBlock) return 0
+
+        val usageMap = calculatePackageUsageMap(context, restriction)
+        val resolvedPackage = if (targetPackage != null) {
+            if (restriction.allPackages.contains(targetPackage)) {
+                targetPackage
+            } else if (isSettingsPackage(targetPackage)) {
+                restriction.allPackages.firstOrNull { isSettingsPackage(it) } ?: targetPackage
+            } else {
+                targetPackage
+            }
+        } else null
+
+        return when {
+            resolvedPackage != null -> {
+                if (restriction.groupLimitType == GroupLimitType.SHARED_SUM) {
+                    usageMap.values.sum()
+                } else {
+                    usageMap[resolvedPackage] ?: 0
+                }
+            }
+            restriction.groupLimitType == GroupLimitType.SHARED_SUM -> {
+                usageMap.values.sum()
+            }
+            else -> {
+                // في حالة عدم تحديد تطبيق والنمط EACH_APP، نأخذ القيمة القصوى لاستهلاك أي تطبيق في المجموعة
+                usageMap.values.maxOrNull() ?: 0
+            }
+        }
+    }
+
+    /**
+     * التحقق مما إذا كان تطبيق معين خاضعاً للحظر حالياً داخل القيد
+     */
+    fun isPackageBlocked(
+        context: Context,
+        restriction: AppRestriction,
+        packageName: String,
+        calendar: Calendar = Calendar.getInstance()
+    ): Boolean {
+        if (!restriction.isEnabled) return false
+        if (isPackageBypassed(packageName)) return false
+        val consumed = calculateConsumedMinutes(context, restriction, packageName)
+        return evaluateRestriction(restriction, consumed, calendar, packageName).isBlocked
     }
 }

@@ -182,7 +182,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
 
             val settingsRestriction = restrictionsRepo.getRestrictionForPackage(pkgName)
             if (settingsRestriction != null && settingsRestriction.isEnabled && !restrictionsRepo.isPackageBypassed(pkgName)) {
-                val consumed = calculateConsumedMinutes(settingsRestriction)
+                val consumed = calculateConsumedMinutes(settingsRestriction, pkgName)
                 val eval = restrictionsRepo.evaluateRestriction(settingsRestriction, consumed, Calendar.getInstance(), pkgName)
                 if (eval.isBlocked) {
                     // إغلاق تطبيق الإعدادات فوراً والعودة للشاشة الرئيسية لمنع التفاعل معه نهائياً
@@ -255,7 +255,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
                             if (!::restrictionsRepo.isInitialized) restrictionsRepo = AppRestrictionsRepository.getInstance(this)
                             val restriction = restrictionsRepo.getRestrictionForPackage(nodePkg)
                             if (restriction != null && restriction.isEnabled && !restrictionsRepo.isPackageBypassed(nodePkg)) {
-                                val consumed = calculateConsumedMinutes(restriction)
+                                val consumed = calculateConsumedMinutes(restriction, nodePkg)
                                 val eval = restrictionsRepo.evaluateRestriction(restriction, consumed, Calendar.getInstance(), nodePkg)
                                 if (eval.isBlocked) {
                                     performGlobalAction(GLOBAL_ACTION_HOME)
@@ -500,7 +500,7 @@ class MuraqibAccessibilityService : AccessibilityService() {
             return
         }
 
-        val consumedMinutes = calculateConsumedMinutes(restriction)
+        val consumedMinutes = calculateConsumedMinutes(restriction, targetPackage)
         val calendar = Calendar.getInstance()
         val evaluation = restrictionsRepo.evaluateRestriction(restriction, consumedMinutes, calendar, targetPackage)
 
@@ -722,126 +722,11 @@ class MuraqibAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {}
     }
 
-    private fun showFullScreenBlockNotification(intent: Intent, appName: String, reason: String) {
-        val channelId = "muraqib_block_alert_channel"
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "تنبيهات الحظر", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "إشعار حظر التطبيق المقيد"
-                setBypassDnd(true)
-            }
-            notificationManager.createNotificationChannel(channel)
+    private fun calculateConsumedMinutes(restriction: AppRestriction, targetPackage: String? = null): Int {
+        if (!::restrictionsRepo.isInitialized) {
+            restrictionsRepo = AppRestrictionsRepository.getInstance(this)
         }
-
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            System.currentTimeMillis().toInt(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-            .setContentTitle("مراقب الاستخدام - تطبيق مقيد")
-            .setContentText("تم حظر $appName: $reason")
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setFullScreenIntent(pendingIntent, true)
-            .setAutoCancel(true)
-            .build()
-
-        notificationManager.notify(1002, notification)
-    }
-
-    private fun calculateConsumedMinutes(restriction: AppRestriction): Int {
-        if (restriction.isTotalBlock) return 0
-
-        val calendar = Calendar.getInstance()
-        val now = System.currentTimeMillis()
-
-        val startTime = when (restriction.limitPeriod) {
-            LimitPeriod.DAILY -> {
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.set(Calendar.MILLISECOND, 0)
-                calendar.timeInMillis
-            }
-            LimitPeriod.WEEKLY -> {
-                calendar.add(Calendar.DAY_OF_YEAR, -6)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.set(Calendar.MILLISECOND, 0)
-                calendar.timeInMillis
-            }
-        }
-
-        val targetPackages = restriction.allPackages.toSet()
-        var totalDurationMs = 0L
-
-        val bootTime = now - android.os.SystemClock.elapsedRealtime()
-
-        try {
-            val events = usageStatsManager.queryEvents(startTime, now)
-            val event = UsageEvents.Event()
-            val startTimes = mutableMapOf<String, Long>()
-
-            while (events.hasNextEvent()) {
-                events.getNextEvent(event)
-                val time = event.timeStamp
-                val type = event.eventType
-
-                // إغلاق أي جلسات مفتوحة فور حدوث إغلاق للنظام أو إطفاء للشاشة
-                if (type == 16 || type == 26 || type == 27) { // SCREEN_NON_INTERACTIVE, DEVICE_SHUTDOWN, DEVICE_STARTUP
-                    for ((_, start) in startTimes) {
-                        if (time > start) {
-                            totalDurationMs += (time - start)
-                        }
-                    }
-                    startTimes.clear()
-                    continue
-                }
-
-                val pkg = event.packageName ?: continue
-                if (!targetPackages.contains(pkg)) continue
-
-                if (type == UsageEvents.Event.ACTIVITY_RESUMED ||
-                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == 29)
-                ) {
-                    startTimes[pkg] = time
-                } else if (type == UsageEvents.Event.ACTIVITY_PAUSED ||
-                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == 30)
-                ) {
-                    val start = startTimes.remove(pkg)
-                    if (start != null && time > start) {
-                        totalDurationMs += (time - start)
-                    }
-                }
-            }
-
-            // احتساب الجلسة المفتوحة حالياً مع عزل وتأمين فترة توقف الهاتف وإعادة التشغيل
-            for ((_, start) in startTimes) {
-                if (start >= bootTime && now > start) {
-                    totalDurationMs += (now - start)
-                } else if (start < bootTime) {
-                    // جلسة لم تسجل إغلاقاً قبل الإقلاع؛ لا تحتسب فترة إيقاف الهاتف
-                    val safeDuration = (bootTime - start).coerceIn(0L, 60_000L)
-                    totalDurationMs += safeDuration
-                }
-            }
-        } catch (e: Exception) {
-            // تجاهل
-        }
-
-        // خطة بديلة باستخدام queryUsageStats في حال كانت queryEvents غير متوفرة
-        if (totalDurationMs == 0L) {
-            val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startTime, now)
-            totalDurationMs = stats?.filter { targetPackages.contains(it.packageName) }
-                ?.sumOf { it.totalTimeInForeground } ?: 0L
-        }
-
-        return (totalDurationMs / 60_000L).toInt()
+        return restrictionsRepo.calculateConsumedMinutes(this, restriction, targetPackage)
     }
 
     override fun onInterrupt() {

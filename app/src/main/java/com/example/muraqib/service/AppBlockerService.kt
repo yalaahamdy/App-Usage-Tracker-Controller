@@ -270,7 +270,7 @@ class AppBlockerService : Service() {
         }
 
         // حساب وقت الاستهلاك للمجموعة أو التطبيق
-        val consumedMinutes = calculateConsumedMinutes(restriction)
+        val consumedMinutes = calculateConsumedMinutes(restriction, topPackage)
 
         val calendar = Calendar.getInstance()
         val evaluation = restrictionsRepo.evaluateRestriction(restriction, consumedMinutes, calendar, topPackage)
@@ -376,94 +376,8 @@ class AppBlockerService : Service() {
         notificationManager.notify(1002, notification)
     }
 
-    private fun calculateConsumedMinutes(restriction: AppRestriction): Int {
-        if (restriction.isTotalBlock) return 0
-
-        val calendar = Calendar.getInstance()
-        val now = System.currentTimeMillis()
-
-        val startTime = when (restriction.limitPeriod) {
-            LimitPeriod.DAILY -> {
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.set(Calendar.MILLISECOND, 0)
-                calendar.timeInMillis
-            }
-            LimitPeriod.WEEKLY -> {
-                calendar.add(Calendar.DAY_OF_YEAR, -6)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.set(Calendar.MILLISECOND, 0)
-                calendar.timeInMillis
-            }
-        }
-
-        val targetPackages = restriction.allPackages.toSet()
-        var totalDurationMs = 0L
-
-        val bootTime = now - SystemClock.elapsedRealtime()
-
-        try {
-            val events = usageStatsManager.queryEvents(startTime, now)
-            val event = UsageEvents.Event()
-            val startTimes = mutableMapOf<String, Long>()
-
-            while (events.hasNextEvent()) {
-                events.getNextEvent(event)
-                val time = event.timeStamp
-                val type = event.eventType
-
-                // إغلاق أي جلسات مفتوحة فور حدوث إغلاق للنظام أو إطفاء للشاشة
-                if (type == 16 || type == 26 || type == 27) { // SCREEN_NON_INTERACTIVE, DEVICE_SHUTDOWN, DEVICE_STARTUP
-                    for ((_, start) in startTimes) {
-                        if (time > start) {
-                            totalDurationMs += (time - start)
-                        }
-                    }
-                    startTimes.clear()
-                    continue
-                }
-
-                val pkg = event.packageName ?: continue
-                if (!targetPackages.contains(pkg)) continue
-
-                if (type == UsageEvents.Event.ACTIVITY_RESUMED ||
-                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == 29)
-                ) {
-                    startTimes[pkg] = time
-                } else if (type == UsageEvents.Event.ACTIVITY_PAUSED ||
-                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && type == 30)
-                ) {
-                    val start = startTimes.remove(pkg)
-                    if (start != null && time > start) {
-                        totalDurationMs += (time - start)
-                    }
-                }
-            }
-
-            // إضافة وقت الجلسة النشطة حالياً مع عزل وتأمين فترة توقف الهاتف وإعادة التشغيل
-            for ((_, start) in startTimes) {
-                if (start >= bootTime && now > start) {
-                    totalDurationMs += (now - start)
-                } else if (start < bootTime) {
-                    // جلسة لم تسجل إغلاقاً قبل الإقلاع؛ لا تحتسب فترة إيقاف الهاتف
-                    val safeDuration = (bootTime - start).coerceIn(0L, 60_000L)
-                    totalDurationMs += safeDuration
-                }
-            }
-        } catch (e: Exception) {
-            // خطأ آمن
-        }
-
-        if (totalDurationMs == 0L) {
-            val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startTime, now)
-            totalDurationMs = stats?.filter { targetPackages.contains(it.packageName) }
-                ?.sumOf { it.totalTimeInForeground } ?: 0L
-        }
-
-        return (totalDurationMs / 60_000L).toInt()
+    private fun calculateConsumedMinutes(restriction: AppRestriction, targetPackage: String? = null): Int {
+        return restrictionsRepo.calculateConsumedMinutes(this, restriction, targetPackage)
     }
 
     private fun createNotificationChannel() {

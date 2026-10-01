@@ -64,6 +64,14 @@ enum class LimitPeriod(val titleAr: String) {
 }
 
 /**
+ * نمط تطبيق حد الاستخدام في المجموعات متعددة التطبيقات
+ */
+enum class GroupLimitType(val titleAr: String, val descriptionAr: String) {
+    EACH_APP("لكل تطبيق على حدة", "يُحسب الحد المحدد لكل تطبيق بشكل مستقل، ويُحظر كل تطبيق بمفرده عند بلوغ حده"),
+    SHARED_SUM("إجمالي مشترك للمجموعة", "يُحسب الحد من مجموع استهلاك كافة تطبيقات المجموعة معاً، وتُحظر جميعاً عند بلوغ الحد")
+}
+
+/**
  * سبب الحظر
  */
 enum class BlockReason(val titleAr: String) {
@@ -88,6 +96,7 @@ data class AppRestriction(
     val hasUsageLimit: Boolean = false,
     val limitDurationMinutes: Int = 30,
     val limitPeriod: LimitPeriod = LimitPeriod.DAILY,
+    val groupLimitType: GroupLimitType = GroupLimitType.EACH_APP,
     // ثانياً: جدول أوقات الاستخدام
     val hasSchedule: Boolean = false,
     val timeWindows: List<TimeWindow> = emptyList(),
@@ -128,6 +137,7 @@ data class AppRestriction(
         json.put("hasUsageLimit", hasUsageLimit)
         json.put("limitDurationMinutes", limitDurationMinutes)
         json.put("limitPeriod", limitPeriod.name)
+        json.put("groupLimitType", groupLimitType.name)
         json.put("hasSchedule", hasSchedule)
 
         val windowsArray = JSONArray()
@@ -188,6 +198,11 @@ data class AppRestriction(
                     LimitPeriod.valueOf(json.optString("limitPeriod", LimitPeriod.DAILY.name))
                 } catch (e: Exception) {
                     LimitPeriod.DAILY
+                },
+                groupLimitType = try {
+                    GroupLimitType.valueOf(json.optString("groupLimitType", GroupLimitType.EACH_APP.name))
+                } catch (e: Exception) {
+                    GroupLimitType.EACH_APP
                 },
                 hasSchedule = json.optBoolean("hasSchedule", false),
                 timeWindows = windows,

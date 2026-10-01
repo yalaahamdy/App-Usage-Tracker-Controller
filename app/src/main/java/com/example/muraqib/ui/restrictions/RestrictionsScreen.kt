@@ -74,6 +74,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.muraqib.data.model.AppRestriction
 import com.example.muraqib.data.model.AppUsageInfo
 import com.example.muraqib.data.model.BlockReason
+import com.example.muraqib.data.model.GroupLimitType
 import com.example.muraqib.data.model.LimitPeriod
 import com.example.muraqib.data.model.RestrictionEvaluation
 import com.example.muraqib.data.repository.AppInfoManager
@@ -233,6 +234,25 @@ fun RestrictionsScreen(
                         } else null
                     }
 
+                    val packageUsageMap = remember(restriction) {
+                        if (restriction.hasUsageLimit) {
+                            restrictionsRepo.calculatePackageUsageMap(context, restriction)
+                        } else {
+                            emptyMap()
+                        }
+                    }
+
+                    val blockedPackages = remember(restriction, packageUsageMap) {
+                        if (restriction.isEnabled) {
+                            val cal = Calendar.getInstance()
+                            restriction.allPackages.filter { pkg ->
+                                restrictionsRepo.isPackageBlocked(context, restriction, pkg, cal)
+                            }
+                        } else {
+                            emptyList()
+                        }
+                    }
+
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                         ModernRestrictionCard(
                             restriction = restriction,
@@ -240,6 +260,8 @@ fun RestrictionsScreen(
                             appIcon = appIcon,
                             appInfoManager = appInfoManager,
                             bypassedApps = bypassedApps,
+                            packageUsageMap = packageUsageMap,
+                            blockedPackages = blockedPackages,
                             onCancelBypassForPackage = { pkg ->
                                 restrictionsRepo.clearTemporaryBypass(pkg)
                             },
@@ -428,6 +450,8 @@ private fun ModernRestrictionCard(
     appIcon: android.graphics.drawable.Drawable?,
     appInfoManager: AppInfoManager,
     bypassedApps: List<BypassedAppDetail> = emptyList(),
+    packageUsageMap: Map<String, Int> = emptyMap(),
+    blockedPackages: List<String> = emptyList(),
     onCancelBypassForPackage: (String) -> Unit = {},
     onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
@@ -437,13 +461,16 @@ private fun ModernRestrictionCard(
     val isAllBypassed = isMultiApp && bypassedApps.isNotEmpty() && bypassedApps.size == restriction.allPackages.size
     val isPartiallyBypassed = isMultiApp && bypassedApps.isNotEmpty() && !isAllBypassed
     val isSingleBypassed = !isMultiApp && bypassedApps.isNotEmpty()
+    val isPartiallyBlocked = isMultiApp && blockedPackages.isNotEmpty() && blockedPackages.size < restriction.allPackages.size
+    val isAllBlocked = (isMultiApp && blockedPackages.size == restriction.allPackages.size) || (!isMultiApp && evaluation.isBlocked) || (evaluation.isBlocked && restriction.isTotalBlock)
 
     val (statusText, statusColor, statusBg) = when {
         !restriction.isEnabled -> Triple("موقوف مؤقتًا", MaterialTheme.colorScheme.outline, MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
         isSingleBypassed -> Triple("تخطي مؤقت نشط", WarningOrange, WarningOrange.copy(alpha = 0.15f))
         isAllBypassed -> Triple("تخطي مؤقت للكل", WarningOrange, WarningOrange.copy(alpha = 0.15f))
         isPartiallyBypassed -> Triple("تخطي جزئي (${bypassedApps.size} من ${restriction.allPackages.size})", WarningOrange, WarningOrange.copy(alpha = 0.15f))
-        evaluation.isBlocked -> Triple("محظور حاليًا", WarningOrange, WarningOrange.copy(alpha = 0.15f))
+        isPartiallyBlocked -> Triple("حظر جزئي (${blockedPackages.size} من ${restriction.allPackages.size})", WarningOrange, WarningOrange.copy(alpha = 0.15f))
+        isAllBlocked || evaluation.isBlocked -> Triple("محظور حاليًا", WarningOrange, WarningOrange.copy(alpha = 0.15f))
         else -> Triple("متاح للاستخدام", SuccessGreen, SuccessGreen.copy(alpha = 0.12f))
     }
 
@@ -651,56 +678,139 @@ private fun ModernRestrictionCard(
             // 2. حد الاستخدام الزمني
             if (restriction.hasUsageLimit) {
                 val allowed = restriction.limitDurationMinutes
-                val consumed = evaluation.consumedMinutes
-                val progress = if (allowed > 0) (consumed.toFloat() / allowed.toFloat()).coerceIn(0f, 1f) else 0f
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.HourglassTop,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "حد الاستخدام (${restriction.limitPeriod.titleAr}):",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                        Text(
-                            text = "$consumed د من أصل $allowed د",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (progress >= 1f) ErrorRed else MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    LinearProgressIndicator(
-                        progress = { progress },
+                if (isMultiApp && restriction.groupLimitType == GroupLimitType.EACH_APP) {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp)),
-                        color = if (progress >= 1f) ErrorRed else MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                        strokeCap = StrokeCap.Round
-                    )
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "حد الاستخدام (${restriction.limitPeriod.titleAr} - لكل تطبيق على حدة):",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Text(
+                                text = "$allowed د لكل تطبيق",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // عرض استهلاك كل تطبيق على حدة مع شريط التقدم الخاص به
+                        restriction.allPackages.forEach { pkg ->
+                            val appUsage = packageUsageMap[pkg] ?: 0
+                            val appProgress = if (allowed > 0) (appUsage.toFloat() / allowed.toFloat()).coerceIn(0f, 1f) else 0f
+                            val isPkgBlocked = blockedPackages.contains(pkg)
+
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = appInfoManager.getAppName(pkg),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isPkgBlocked) ErrorRed else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "$appUsage د من أصل $allowed د" + if (isPkgBlocked) " (محظور)" else "",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (appProgress >= 1f || isPkgBlocked) ErrorRed else MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                LinearProgressIndicator(
+                                    progress = { appProgress },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(5.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                    color = if (appProgress >= 1f || isPkgBlocked) ErrorRed else MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    strokeCap = StrokeCap.Round
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    val consumed = evaluation.consumedMinutes
+                    val progress = if (allowed > 0) (consumed.toFloat() / allowed.toFloat()).coerceIn(0f, 1f) else 0f
+                    val labelSuffix = if (isMultiApp && restriction.groupLimitType == GroupLimitType.SHARED_SUM) {
+                        " - إجمالي مشترك للمجموعة"
+                    } else ""
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "حد الاستخدام (${restriction.limitPeriod.titleAr}$labelSuffix):",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Text(
+                                text = "$consumed د من أصل $allowed د",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (progress >= 1f) ErrorRed else MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = if (progress >= 1f) ErrorRed else MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            strokeCap = StrokeCap.Round
+                        )
+                    }
                 }
             }
 
